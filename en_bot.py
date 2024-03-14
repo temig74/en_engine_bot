@@ -2,7 +2,7 @@ import datetime
 import json
 from time import sleep
 import requests
-import telebot  # pip install pyTelegramBotAPI
+import telebot  #  pip install pyTelegramBotAPI
 import threading
 import base64
 from selenium import webdriver  # pip install selenium
