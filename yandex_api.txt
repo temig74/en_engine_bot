@@ -1,0 +1,64 @@
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+	<script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU&amp;apikey=#my_api_key" type="text/javascript"></script>
+	<script type="text/javascript">
+	function init () {
+    var multiRoute = new ymaps.multiRouter.MultiRoute({
+        referencePoints: [[#coords1], [#coords2]],
+        params: {results: 1}
+    }, {
+        boundsAutoApply: #bounds_flag
+    });
+
+    var myMap = new ymaps.Map('map', {center: [#coords1], zoom: 17, type: '#map_type'});
+    
+	var layer = myMap.layers.get(0).get(0);
+    waitForTilesLoad(layer).then(function() {
+        document.title = 'loaded';
+    });
+	
+	myMap.geoObjects.add(multiRoute);
+}
+
+// Получить слой, содержащий тайлы.
+function getTileContainer(layer) {
+    for (var k in layer) {
+        if (layer.hasOwnProperty(k)) {
+            if (
+                layer[k] instanceof ymaps.layer.tileContainer.CanvasContainer
+                || layer[k] instanceof ymaps.layer.tileContainer.DomContainer
+            ) {
+                return layer[k];
+            }
+        }
+    }
+    return null;
+}
+
+// Определить, все ли тайлы загружены. Возвращает Promise.
+function waitForTilesLoad(layer) {
+    return new ymaps.vow.Promise(function (resolve, reject) {
+        var tc = getTileContainer(layer), readyAll = true;
+        tc.tiles.each(function (tile, number) {
+            if (!tile.isReady()) {
+                readyAll = false;
+            }
+        });
+        if (readyAll) {
+            resolve();
+        } else {
+            tc.events.once("ready", function() {
+                resolve();
+            });
+        }
+    });
+}
+
+ymaps.ready(init);</script>
+
+<style>html, body, #map {width: 100%; height: 100%; padding: 0; margin: 0;}</style>
+</head>
+<body><div id="map"></div></body>
+</html>
+
