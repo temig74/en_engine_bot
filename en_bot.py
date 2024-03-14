@@ -223,7 +223,7 @@ def check_engine(cur_chat_id):
                 if len(game_json['Level']['Tasks']) > 0:
                     if 'штраф' in game_json['Level']['Tasks'][0]['TaskText'].lower() or ' ложн' in game_json['Level']['Tasks'][0]['TaskText'].lower():
                         CUR_PARAMS[cur_chat_id]['accept_codes'] = False
-                        BOT.send_message(cur_chat_id, 'В тексте обнаружена информация о штрафах, ввод кодов отключен!')
+                        BOT.send_message(cur_chat_id, 'В тексте обнаружена информация о штрафах, ввод кодов отключен! Для включения выполните /accept_codes')
 
                 send_curlevel_info(cur_chat_id, game_json)
                 if len(game_json['Level']['Tasks']) > 0:
