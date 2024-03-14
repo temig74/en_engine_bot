@@ -324,7 +324,7 @@ def monitoring_func(cur_chat_id):
 
 @BOT.message_handler(commands=['help', 'start'])
 def send_welcome(message):
-    BOT.send_message(message.chat.id, '''Temig enbot v1.0
+    BOT.send_message(message.chat.id, '''Temig enbot v1.1
 https://github.com/temig74/en_engine_bot/
 /help - этот help
 /auth домен id_игры логин пароль [id_чата] - авторизовать бота на игру в игровом чате
