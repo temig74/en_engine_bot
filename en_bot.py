@@ -38,7 +38,8 @@ CHECK_INTERVAL = int(config['Settings']['Check_interval'])
 TIMELEFT_ALERT1 = int(config['Settings']['Timeleft_alert1'])
 TIMELEFT_ALERT2 = int(config['Settings']['Timeleft_alert2'])
 
-YANDEX_API_PATTERN = ''
+with open('yandex_api.txt', 'r') as yandex_api_file:
+    YANDEX_API_PATTERN = yandex_api_file.read()
 
 executable_dir = os.path.dirname(sys.executable)
 folder_path = os.path.join(executable_dir, 'level_snapshots')
