@@ -38,7 +38,7 @@ CHECK_INTERVAL = int(config['Settings']['Check_interval'])
 TIMELEFT_ALERT1 = int(config['Settings']['Timeleft_alert1'])
 TIMELEFT_ALERT2 = int(config['Settings']['Timeleft_alert2'])
 
-with open('yandex_api.txt', 'r') as yandex_api_file:
+with open('yandex_api.txt', 'r', encoding='UTF8') as yandex_api_file:
     YANDEX_API_PATTERN = yandex_api_file.read()
 
 executable_dir = os.path.dirname(sys.executable)
@@ -324,7 +324,7 @@ def monitoring_func(cur_chat_id):
 
 @BOT.message_handler(commands=['help', 'start'])
 def send_welcome(message):
-    BOT.send_message(message.chat.id, '''Temig enbot v1.1
+    BOT.send_message(message.chat.id, r'''Temig enbot v1.1
 https://github.com/temig74/en_engine_bot/
 /help - этот help
 /auth домен id_игры логин пароль [id_чата] - авторизовать бота на игру в игровом чате
