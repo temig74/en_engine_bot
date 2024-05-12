@@ -38,8 +38,7 @@ CHECK_INTERVAL = int(config['Settings']['Check_interval'])
 TIMELEFT_ALERT1 = int(config['Settings']['Timeleft_alert1'])
 TIMELEFT_ALERT2 = int(config['Settings']['Timeleft_alert2'])
 
-with open('yandex_api.txt', 'r') as yandex_api_file:
-    YANDEX_API_PATTERN = yandex_api_file.read()
+YANDEX_API_PATTERN = ''
 
 executable_dir = os.path.dirname(sys.executable)
 folder_path = os.path.join(executable_dir, 'level_snapshots')
@@ -351,7 +350,7 @@ https://github.com/temig74/en_engine_bot/
 /game_info - информация об игре
 /set_doc - установить ссылку на гуглдок
 /set_coords - установить текущие координаты (для построителя маршрутов)
-''')
+''', link_preview_options=telebot.types.LinkPreviewOptions(is_disabled=True))
 
 
 @BOT.message_handler(commands=['auth'])
