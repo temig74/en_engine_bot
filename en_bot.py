@@ -547,7 +547,7 @@ def get_time(message):
         BOT.send_message(message.chat.id, 'Ошибка')
         return
     if game_json["Level"]["Timeout"] == 0:
-        BOT.send_message(message.chat.id, f'Нет автоперехода')
+        BOT.send_message(message.chat.id, f'Автопереход отсутствует')
         return
     BOT.send_message(message.chat.id, f'Автопереход через {datetime.timedelta(seconds=game_json["Level"]["TimeoutSecondsRemain"])}')
 
