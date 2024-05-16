@@ -504,7 +504,7 @@ def set_coords(message):
 
 @BOT.message_handler(commands=['get_chat_id'])
 def get_chat_id(message):
-    BOT.send_message(message.chat.id, str(message.chat.id))
+    BOT.send_message(message.chat.id, f'<code>{str(message.chat.id)}</code>', parse_mode='HTML')
 
 
 @BOT.message_handler(commands=['game_monitor'])
