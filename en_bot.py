@@ -351,7 +351,7 @@ https://github.com/temig74/en_engine_bot/
 /game_info - информация об игре
 /set_doc - установить ссылку на гуглдок
 /set_coords - установить текущие координаты (для построителя маршрутов)
-''')
+''', link_preview_options=telebot.types.LinkPreviewOptions(is_disabled=True))
 
 
 @BOT.message_handler(commands=['auth'])
