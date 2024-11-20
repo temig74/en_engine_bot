@@ -65,6 +65,6 @@ author: Temig (https://world.en.cx/UserDetails.aspx?uid=154783)
 - /set_coords - установить текущие координаты (для построителя маршрутов)
 
 Если будет желание задонатить:
-5536 9138 8657 7465 T-bank
-USDT TBwC4TCnWBd1qEX6YiHKmAgNXGh1cqkWJW (TRC20)
-Еноты (id 154783)
+- 5536 9138 8657 7465 T-bank
+- USDT TBwC4TCnWBd1qEX6YiHKmAgNXGh1cqkWJW (TRC20)
+- Еноты (id 154783)
