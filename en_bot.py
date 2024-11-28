@@ -133,6 +133,11 @@ def send_curlevel_info(cur_chat, cur_json):
     # Выводим информацию о номере уровня, автопереходе, блокировке ответов
     gameinfo_str = f'Уровень {cur_json["Level"]["Number"]} из {len(cur_json["Levels"])} {cur_json["Level"]["Name"]}\n'
     gameinfo_str += f'Выполнить секторов: {cur_json["Level"]["RequiredSectorsCount"] if cur_json["Level"]["RequiredSectorsCount"] > 0 else 1} из {len(cur_json["Level"]["Sectors"]) if len(cur_json["Level"]["Sectors"]) > 0 else 1}\n'
+    if cur_json["Level"]["Messages"]:
+        gameinfo_str += 'Сообщения на уровне:\n'
+        for elem in cur_json["Level"]["Messages"]:
+            gameinfo_str += elem["MessageText"]+'\n'
+
     if cur_json["Level"]["Timeout"] > 0:
         gameinfo_str += f'Автопереход через {datetime.timedelta(seconds=cur_json["Level"]["Timeout"])}\n'
     else:
