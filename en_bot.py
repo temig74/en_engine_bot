@@ -90,8 +90,11 @@ def gen_kml2(text):
 
 
 def add_coords_copy(text):
-    pattern = r'((?<![@1234567890-])-?\d{1,2}\.\d{3,10}[, ]*-?\d{1,3}\.\d{3,10})'
-    return re.sub(pattern, r'`\1`', text)
+    # escape tags
+    escaped_text = re.sub(r'<(?!code>)([^>]*)>', lambda match: f'&lt;{match.group(1)}&gt;', text)
+    # add <code> to coords
+    coords_pattern = r'((?<![@1234567890-])-?\d{1,2}\.\d{3,10}[, ]*-?\d{1,3}\.\d{3,10})'
+    return re.sub(coords_pattern, r'<code>\1</code>', escaped_text)
 
 
 # Функция отправки kml и координат
@@ -155,7 +158,7 @@ def send_curlevel_info(cur_chat, cur_json):
 
     # Если очень большой текст на уровне, то сплит
     for i in range(0, len(gamelevel_str), TASK_MAX_LEN):
-        BOT.send_message(cur_chat, gamelevel_str[i:i + TASK_MAX_LEN], parse_mode='MarkDown')
+        BOT.send_message(cur_chat, gamelevel_str[i:i + TASK_MAX_LEN], parse_mode='HTML')
 
 
 def check_engine(cur_chat_id):
@@ -288,7 +291,7 @@ def check_engine(cur_chat_id):
                 for i, elem in enumerate(CUR_PARAMS[cur_chat_id]["cur_json"]['Level']['Helps']):
                     if elem['HelpText'] != old_json['Level']['Helps'][i]['HelpText']:
                         # BOT.send_message(cur_chat_id, f'Подсказка {i + 1}: {elem["HelpText"]}')
-                        BOT.send_message(cur_chat_id, f'Подсказка {i + 1}: {add_coords_copy(elem["HelpText"])}', parse_mode='MarkDown')
+                        BOT.send_message(cur_chat_id, f'Подсказка {i + 1}: {add_coords_copy(elem["HelpText"])}', parse_mode='HTML')
                         send_kml_info(cur_chat_id, elem["HelpText"], f'{CUR_PARAMS[cur_chat_id]["cur_json"]["Level"]["Number"]}_{i+1}')
 
             # мониторинг закрытия секторов
@@ -304,7 +307,7 @@ def check_engine(cur_chat_id):
             if CUR_PARAMS[cur_chat_id]['bonus_monitor']:
                 for elem in game_json['Level']['Bonuses']:
                     if elem not in old_json['Level']['Bonuses'] and elem["IsAnswered"] and (elem['BonusId'] not in CUR_PARAMS[cur_chat_id]['sector_closers']):
-                        BOT.send_message(cur_chat_id, f'{"🔴" if elem["Negative"] else "🟢"} №{elem["Number"]} {elem["Name"] or ""} {elem["Answer"]["Answer"]} ({elem["Answer"]["Login"]}) {"Штраф: " if elem["Negative"] else "Бонус: "} {datetime.timedelta(seconds=elem["AwardTime"])}\n{"Подсказка бонуса:" + chr(10) + add_coords_copy(elem["Help"]) if elem["Help"] else ""}', parse_mode='MarkDown')
+                        BOT.send_message(cur_chat_id, f'{"🔴" if elem["Negative"] else "🟢"} №{elem["Number"]} {elem["Name"] or ""} {elem["Answer"]["Answer"]} ({elem["Answer"]["Login"]}) {"Штраф: " if elem["Negative"] else "Бонус: "} {datetime.timedelta(seconds=elem["AwardTime"])}\n{"Подсказка бонуса:" + chr(10) + add_coords_copy(elem["Help"]) if elem["Help"] else ""}', parse_mode='HTML')
                         if elem["Help"]:
                             send_kml_info(cur_chat_id, elem["Help"], CUR_PARAMS[cur_chat_id]["cur_json"]["Level"]["Number"])
 
@@ -655,7 +658,7 @@ def get_hints(message):
     if result_str == '':
         result_str = 'Нет подсказок'
     #BOT.send_message(message.chat.id, result_str)
-    BOT.send_message(message.chat.id, add_coords_copy(result_str), parse_mode='MarkDown')
+    BOT.send_message(message.chat.id, add_coords_copy(result_str), parse_mode='HTML')
 
 
 @BOT.message_handler(commands=['task'])
