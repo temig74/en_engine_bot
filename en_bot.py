@@ -5,22 +5,19 @@ import requests
 import telebot  # pip install pyTelegramBotAPI
 import threading
 import base64
+
 from selenium import webdriver  # pip install selenium
 from selenium.webdriver.firefox.options import Options  # Need installed Firefox in system
-
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-# from selenium.webdriver.common.by import By
 
+from bs4 import BeautifulSoup  # pip install BeautifulSoup4
 import io
 import re
 import os.path
-import sys
 import configparser
+import random
 
-# from bs4 import BeautifulSoup
-# import curlify
-# import webbrowser
 
 # Читаем конфиг
 config = configparser.ConfigParser()
@@ -37,13 +34,14 @@ LANG = config['Settings']['Lang']
 CHECK_INTERVAL = int(config['Settings']['Check_interval'])
 TIMELEFT_ALERT1 = int(config['Settings']['Timeleft_alert1'])
 TIMELEFT_ALERT2 = int(config['Settings']['Timeleft_alert2'])
+STOP_ACCEPT_CODES_WORDS = tuple(config['Settings']['Stop_accept_codes_words'].split(','))
+MAX_SCREEN_HEIGHT = int(config['Settings']['Max_screen_height'])
 
 with open('yandex_api.txt', 'r', encoding='utf8') as yandex_api_file:
     YANDEX_API_PATTERN = yandex_api_file.read()
 
-executable_dir = os.path.dirname(sys.executable)
-folder_path = os.path.join(executable_dir, 'level_snapshots')
-print(folder_path)
+# executable_dir = os.path.dirname(sys.executable)
+folder_path = os.path.join(os.curdir, 'level_snapshots')
 if not os.path.exists(folder_path):
     os.makedirs(folder_path)
 
@@ -57,6 +55,7 @@ BOT = telebot.TeleBot(config['Settings']['Token'], num_threads=int(config['Setti
 def modify_message(bot_instance, message):
     if message.text is None:
         return
+
     cmd = message.text.split('@')[0].split()[0].lower()[1:]
     # Запрет всех команд в чате, кроме тех, которые могут работать в неавторизованном чате, перенаправляем на handler INCORRECT_CHAT
     if cmd not in ('help', 'start', 'auth', 'get_chat_id', '*', 'geo', 'leave_chat', 'test') and message.chat.id not in CUR_PARAMS:
@@ -68,10 +67,40 @@ def modify_message(bot_instance, message):
         return
 
 
+def parse_html(html_content):
+    try:
+        soup = BeautifulSoup(html_content, 'html.parser')
+        for img_tag in soup.find_all('img'):
+            src = img_tag.get('src')
+            if src:
+                inline_image_text = f"[Img: {src}]"
+                img_tag.replace_with(inline_image_text + " ")
+            else:
+                img_tag.decompose()
+
+        for br_tag in soup.find_all(['br', 'br/']):
+            br_tag.replace_with('\n')
+
+        for a_tag in soup.find_all('a'):
+            href = a_tag.get('href')
+            link_text = a_tag.get_text(strip=True)
+            if href and link_text:
+                inline_link_text = f"[{link_text}]({href})"
+                a_tag.replace_with(inline_link_text)
+            else:
+                a_tag.replace_with(link_text)
+
+        text_content = soup.get_text()
+    except Exception as e:
+        text_content = f'Ошибка парсинга текста: {e} \n {html_content}'
+
+    return text_content
+
+
 # Парсинг текста на список координат и файл KML
-def gen_kml2(text):
-    # coord_list = re.findall(r'-?\d{1,2}\.\d{3,10}[, ]*-?\d{1,3}\.\d{3,10}', text)
-    coord_list = re.findall(r'(?<![@1234567890-])-?\d{1,2}\.\d{3,10}[, ]*-?\d{1,3}\.\d{3,10}', text)
+def gen_kml2(text: str):
+    coord_list = re.findall(r'-?\d{1,2}\.\d{3,10}[, ]*-?\d{1,3}\.\d{3,10}', text)
+    # coord_list = re.findall(r'(?<![@1234567890-])-?\d{1,2}\.\d{3,10}[NS]?\s*<br\s*/?>\s*-?\d{1,3}\.\d{3,10}', text) #fix B
     if not coord_list:
         return
     result_list = []
@@ -106,6 +135,7 @@ def send_kml_info(cur_chat, parse_text, level_num):
             kml_str += '`' + elem[0] + ' ' + elem[1] + '`\n'
         kml_var[0].name = f'points{level_num}.kml'
         BOT.send_document(cur_chat, kml_var[0], caption=kml_str, parse_mode='MarkDown')
+        kml_var[0].close()
         BOT.send_venue(cur_chat, kml_var[1][0][0], kml_var[1][0][1], f'{kml_var[1][0][0]}, {kml_var[1][0][1]}', '')
         last_coords = CUR_PARAMS[cur_chat]['last_coords']
 
@@ -152,7 +182,7 @@ def send_curlevel_info(cur_chat, cur_json):
     # Отдельно выводим задание
     if len(cur_json['Level']['Tasks']) > 0:
         # gamelevel_str = cur_json['Level']['Tasks'][0]['TaskText']
-        gamelevel_str = add_coords_copy(cur_json['Level']['Tasks'][0]['TaskText'])
+        gamelevel_str = add_coords_copy(parse_html(cur_json['Level']['Tasks'][0]['TaskText']) if CUR_PARAMS[cur_chat]['parser'] else cur_json['Level']['Tasks'][0]['TaskText'])
     else:
         gamelevel_str = 'Нет заданий на уровне'
 
@@ -164,8 +194,8 @@ def send_curlevel_info(cur_chat, cur_json):
 def check_engine(cur_chat_id):
     try:
         game_json = CUR_PARAMS[cur_chat_id]["session"].get(f'https://{CUR_PARAMS[cur_chat_id]["cur_domain"]}/GameEngines/Encounter/Play/{CUR_PARAMS[cur_chat_id]["cur_json"]["GameId"]}?json=1&lang={LANG}').json()
-    except:
-        BOT.send_message(cur_chat_id, 'Ошибка мониторинга, возможно необходимо заново авторизоваться')
+    except Exception as e:
+        BOT.send_message(cur_chat_id, f'Ошибка мониторинга, возможно необходимо заново авторизоваться:\n{e}')
         return
 
     # False - если цикл надо прервать (Серьезная ошибка), True - если продолжать
@@ -231,10 +261,12 @@ def check_engine(cur_chat_id):
                 CUR_PARAMS[cur_chat_id]['5_min_sent'] = False
                 CUR_PARAMS[cur_chat_id]['1_min_sent'] = False
                 BOT.send_message(cur_chat_id, 'АП!\n' + ' '.join(CUR_PARAMS[cur_chat_id].get('players', '')))
+                if CUR_PARAMS[cur_chat_id]['send_screen']:
+                    send_screen(cur_chat_id, f'https://{CUR_PARAMS[cur_chat_id]["cur_domain"]}/GameEngines/Encounter/Play/{CUR_PARAMS[cur_chat_id]["cur_json"]["GameId"]}?lang={LANG}', full=True)
 
                 # отключение ввода кодов при обнаружении штрафных
                 if len(game_json['Level']['Tasks']) > 0:
-                    if 'штраф' in game_json['Level']['Tasks'][0]['TaskText'].lower() or ' ложн' in game_json['Level']['Tasks'][0]['TaskText'].lower():
+                    if any(item in game_json['Level']['Tasks'][0]['TaskText'].lower() for item in STOP_ACCEPT_CODES_WORDS):
                         CUR_PARAMS[cur_chat_id]['accept_codes'] = False
                         BOT.send_message(cur_chat_id, 'В тексте обнаружена информация о штрафах, ввод кодов отключен! Для включения выполните /accept_codes')
 
@@ -264,7 +296,7 @@ def check_engine(cur_chat_id):
             # проверка на сообщения на уровне:
             for elem in game_json['Level']['Messages']:
                 if elem not in old_json['Level']['Messages']:
-                    BOT.send_message(cur_chat_id, f'Добавлено сообщение: {elem["MessageText"]}')
+                    BOT.send_message(cur_chat_id, f'Добавлено сообщение: {parse_html(elem["MessageText"]) if CUR_PARAMS[cur_chat_id]['parser'] else elem["MessageText"]}')
 
             # проверка на количество секторов на уровне:
             if len(old_json['Level']['Sectors']) != len(game_json['Level']['Sectors']):
@@ -291,7 +323,7 @@ def check_engine(cur_chat_id):
                 for i, elem in enumerate(CUR_PARAMS[cur_chat_id]["cur_json"]['Level']['Helps']):
                     if elem['HelpText'] != old_json['Level']['Helps'][i]['HelpText']:
                         # BOT.send_message(cur_chat_id, f'Подсказка {i + 1}: {elem["HelpText"]}')
-                        BOT.send_message(cur_chat_id, f'Подсказка {i + 1}: {add_coords_copy(elem["HelpText"])}', parse_mode='HTML')
+                        BOT.send_message(cur_chat_id, f'Подсказка {i + 1}: {add_coords_copy(parse_html(elem["HelpText"]) if CUR_PARAMS[cur_chat_id]['parser'] else elem["HelpText"])}', parse_mode='HTML')
                         send_kml_info(cur_chat_id, elem["HelpText"], f'{CUR_PARAMS[cur_chat_id]["cur_json"]["Level"]["Number"]}_{i+1}')
 
             # мониторинг закрытия секторов
@@ -307,7 +339,7 @@ def check_engine(cur_chat_id):
             if CUR_PARAMS[cur_chat_id]['bonus_monitor']:
                 for elem in game_json['Level']['Bonuses']:
                     if elem not in old_json['Level']['Bonuses'] and elem["IsAnswered"] and (elem['BonusId'] not in CUR_PARAMS[cur_chat_id]['sector_closers']):
-                        BOT.send_message(cur_chat_id, f'{"🔴" if elem["Negative"] else "🟢"} №{elem["Number"]} {elem["Name"] or ""} {elem["Answer"]["Answer"]} ({elem["Answer"]["Login"]}) {"Штраф: " if elem["Negative"] else "Бонус: "} {datetime.timedelta(seconds=elem["AwardTime"])}\n{"Подсказка бонуса:" + chr(10) + add_coords_copy(elem["Help"]) if elem["Help"] else ""}', parse_mode='HTML')
+                        BOT.send_message(cur_chat_id, f'{"🔴" if elem["Negative"] else "🟢"} №{elem["Number"]} {elem["Name"] or ""} {elem["Answer"]["Answer"]} ({elem["Answer"]["Login"]}) {"Штраф: " if elem["Negative"] else "Бонус: "} {datetime.timedelta(seconds=elem["AwardTime"])}\n{"Подсказка бонуса:" + chr(10) + add_coords_copy(parse_html(elem["Help"]) if CUR_PARAMS[cur_chat_id]['parser'] else elem["Help"]) if elem["Help"] else ""}', parse_mode='HTML')
                         if elem["Help"]:
                             send_kml_info(cur_chat_id, elem["Help"], CUR_PARAMS[cur_chat_id]["cur_json"]["Level"]["Number"])
 
@@ -326,13 +358,14 @@ def monitoring_func(cur_chat_id):
     BOT.send_message(cur_chat_id, 'Мониторинг включен')
     while CUR_PARAMS[cur_chat_id]['monitoring_flag']:
         print(f'Слежение за игрой в чате {cur_chat_id} работает {datetime.datetime.now()-start_time}')
-        sleep(CHECK_INTERVAL)
+        sleep(CHECK_INTERVAL+random.uniform(-1, 1))
         try:
             if not (check_engine(cur_chat_id)):
                 break
-        except:
-            print('Ошибка функции check_engine, продолжаю мониторинг')
-    CUR_PARAMS[cur_chat_id]['monitoring_flag'] = False
+        except Exception as e:
+            print(f'Ошибка функции check_engine, продолжаю мониторинг:\n{e}')
+    if CUR_PARAMS.get(cur_chat_id, None):
+        CUR_PARAMS[cur_chat_id]['monitoring_flag'] = False
     BOT.send_message(cur_chat_id, 'Мониторинг выключен')
 
 
@@ -350,12 +383,15 @@ https://github.com/temig74/en_engine_bot/
 /bonuses [level№] - показать бонусы [прошедшего_уровня]
 /hints - показать подсказки
 /task - показать текущее задание
-/screen - скриншот текущего уровня (необходим firefox)
+/screen, /скрин - скриншот текущего уровня (необходим firefox)
+/fscreen, /фскрин - полный скриншот текущего уровня (необходим firefox)
 /любой_код123 - вбитие в движок любой_код123
 /accept_codes [0] - включить/[выключить] прием кодов из чата
 /sector_monitor [0] - включить/[выключить] мониторинг секторов
 /bonus_monitor [0] - включить/[выключить] мониторинг бонусов
 /route_builder [0] - включить/[выключить] построитель маршрутов
+/parser [0] - включить/[выключить] парсер HTML
+/send_screen [0] - включить/[выключить] отправку скрина нового уровня
 /time - оставшееся время до апа
 /load_old_json - загрузить информацию о прошедших уровнях игры из файла (при перезапуске бота)
 /geo или /* координаты через пробел - отправить геометку по координатам
@@ -365,6 +401,7 @@ https://github.com/temig74/en_engine_bot/
 /game_info - информация об игре
 /set_doc - установить ссылку на гуглдок
 /set_coords - установить текущие координаты (для построителя маршрутов)
+/code_in_block [0] - включить/[выключить] отправку кодов в основное поле при блокировке
 ''', link_preview_options=telebot.types.LinkPreviewOptions(is_disabled=True))
 
 
@@ -398,8 +435,8 @@ def auth(message):
 
     try:
         auth_request_json = my_session.post(f'https://{my_domain}/login/signin?json=1', data={'Login': my_login, 'Password': my_password}).json()
-    except:
-        BOT.send_message(message.chat.id, 'Ошибка запроса авторизации, возможно неверно указан домен')
+    except Exception as e:
+        BOT.send_message(message.chat.id, f'Ошибка запроса авторизации, возможно неверно указан домен:\n{e}')
         return
 
     match auth_request_json['Error']:
@@ -438,8 +475,8 @@ def auth(message):
             try:
                 # Получаем информацию об игре
                 cur_json = my_session.get(f'https://{my_domain}/GameEngines/Encounter/Play/{my_game_id}?json=1').json()
-            except:
-                BOT.send_message(message.chat.id, 'Ошибка запроса авторизации, возможно неверно указан id игры')
+            except Exception as e:
+                BOT.send_message(message.chat.id, f'Ошибка запроса авторизации, возможно неверно указан id игры: {e}')
                 return
 
             BOT.send_message(message.chat.id, 'Авторизация успешна')  # Только если успешна, то заново инициализируем словарь параметров чата
@@ -458,7 +495,11 @@ def auth(message):
                 'driver': None,
                 'sector_closers': {},
                 'bonus_closers': {},
-                'last_coords': None}
+                'last_coords': None,
+                'parser': True,
+                'send_screen': True,
+                'code_in_block': False
+                }
 
             # запускаем firefox браузер, который будем использовать для скриншотов уровня и скринов маршрутов
             # print('Запускаю виртуальный браузер')
@@ -466,14 +507,15 @@ def auth(message):
             options.add_argument("--headless")  # не отображаемый в системе
             options.set_preference("general.useragent.override", USER_AGENT['User-agent'])
             my_driver = webdriver.Firefox(options=options)
-            my_driver.get(f'https://{my_domain}')
-            my_driver.add_cookie({'name': 'atoken', 'value': my_session.cookies.get_dict()['atoken'], 'domain': '.en.cx', 'secure': False, 'httpOnly': True, 'session': True})
+            # my_driver.get(f'https://{my_domain}')
+            my_driver.get(f'https://{my_domain}/GameEngines/Encounter/Play/{my_game_id}')
+            # my_driver.add_cookie({'name': 'atoken', 'value': my_session.cookies.get_dict()['atoken'], 'domain': '.en.cx', 'secure': False, 'httpOnly': True, 'session': True})
+            my_driver.add_cookie({'name': 'atoken', 'value': my_session.cookies.get_dict()['atoken'], 'domain': '.' + my_domain, 'secure': False, 'httpOnly': True, 'session': True})
             my_driver.add_cookie({'name': 'stoken', 'value': my_session.cookies.get_dict()['stoken'], 'domain': '.' + my_domain, 'secure': False, 'httpOnly': False, 'session': True})
             CUR_PARAMS[cur_chat_id]['driver'] = my_driver
-            # print('Виртуальный браузер запущен')
             # CUR_PARAMS[cur_chat_id]['driver'].add_cookie({'name': 'GUID', 'value': CUR_PARAMS[cur_chat_id]['session'].cookies.get_dict()['GUID'], 'domain': CUR_PARAMS[cur_chat_id]['cur_domain'], 'secure': False, 'httpOnly': True, 'session': False})
             # r = CUR_PARAMS[cur_chat_id]['session'].get(f'https://{CUR_PARAMS[cur_chat_id]["cur_domain"]}/GameEngines/Encounter/Play/{my_game_id}')
-            # print(curlify.to_curl(r.request))
+            BOT.send_message(message.chat.id, 'Виртуальный браузер запущен')
 
 
 @BOT.message_handler(commands=['stop_auth'])
@@ -529,32 +571,38 @@ def game_monitor(message):
     else:
         if not (CUR_PARAMS[message.chat.id]['monitoring_flag']):
             CUR_PARAMS[message.chat.id]['monitoring_flag'] = True
-            threading.Thread(target=monitoring_func(message.chat.id)).start()
+            # threading.Thread(target=monitoring_func(message.chat.id)).start()
+            thread = threading.Thread(target=monitoring_func, args=(message.chat.id,))
+            thread.start()
         else:
             BOT.send_message(message.chat.id, 'Слежение уже запущено')
 
 
-@BOT.message_handler(commands=['accept_codes', 'sector_monitor', 'bonus_monitor', 'route_builder'])
+@BOT.message_handler(commands=['accept_codes', 'sector_monitor', 'bonus_monitor', 'route_builder', 'parser', 'send_screen', 'code_in_block'])
 def switch_flag(message):
     d = {'accept_codes': 'Прием кодов',
          'sector_monitor': 'Мониторинг секторов',
          'bonus_monitor': 'Мониторинг бонусов',
-         'route_builder': 'Построитель маршрутов'}
+         'route_builder': 'Построитель маршрутов',
+         'parser': 'Парсер HTML',
+         'send_screen': 'Отправка скринов',
+         'code_in_block': 'Отправка в блок'
+         }
     cmd = message.text[1:].split()[0].split('@')[0].lower()
     if len(message.text.split()) == 2 and message.text.split()[1] == '0':
         cmd_flag = False
     else:
         cmd_flag = True
     CUR_PARAMS[message.chat.id][cmd] = cmd_flag
-    BOT.send_message(message.chat.id, f'{d.get(cmd)} {"включен" if cmd_flag else "выключен"}')
+    BOT.send_message(message.chat.id, f'{d.get(cmd)} {"включен(а)" if cmd_flag else "выключен(а)"}')
 
 
 @BOT.message_handler(commands=['time'])
 def get_time(message):
     try:
         game_json = CUR_PARAMS[message.chat.id]['session'].get(f'https://{CUR_PARAMS[message.chat.id]["cur_domain"]}/GameEngines/Encounter/Play/{CUR_PARAMS[message.chat.id]["cur_json"]["GameId"]}?json=1').json()
-    except:
-        BOT.send_message(message.chat.id, 'Ошибка, возможно необходимо заново авторизоваться')
+    except Exception as e:
+        BOT.send_message(message.chat.id, f'Ошибка, возможно необходимо заново авторизоваться:\n{e}')
         return
 
     if game_json['Event'] != 0:
@@ -579,8 +627,8 @@ def get_sectors(message):
     else:
         try:
             game_json = CUR_PARAMS[message.chat.id]['session'].get(f'https://{CUR_PARAMS[message.chat.id]["cur_domain"]}/GameEngines/Encounter/Play/{CUR_PARAMS[message.chat.id]["cur_json"]["GameId"]}?json=1').json()
-        except:
-            BOT.send_message(message.chat.id, 'Ошибка, возможно необходимо заново авторизоваться')
+        except Exception as e:
+            BOT.send_message(message.chat.id, f'Ошибка, возможно необходимо заново авторизоваться:\n{e}')
             return
 
     result_str = ''
@@ -615,8 +663,8 @@ def get_bonuses(message):
     else:
         try:
             game_json = CUR_PARAMS[message.chat.id]['session'].get(f'https://{CUR_PARAMS[message.chat.id]["cur_domain"]}/GameEngines/Encounter/Play/{CUR_PARAMS[message.chat.id]["cur_json"]["GameId"]}?json=1').json()
-        except:
-            BOT.send_message(message.chat.id, 'Ошибка, возможно необходимо заново авторизоваться')
+        except Exception as e:
+            BOT.send_message(message.chat.id, f'Ошибка, возможно необходимо заново авторизоваться:\n{e}')
             return
 
     result_str = ''
@@ -627,11 +675,13 @@ def get_bonuses(message):
 
     for elem in game_json['Level']['Bonuses']:
         if elem['IsAnswered']:
-            result_str += f'{"🔴" if elem["Negative"] else "🟢"}№{elem["Number"]} {elem["Name"] or ""} {elem["Answer"]["Answer"]} ({elem["Answer"]["Login"]}) {CUR_PARAMS[message.chat.id]["bonus_closers"].get(elem["BonusId"], "")} {"Штраф: " if elem["Negative"] else "Бонус: "} {datetime.timedelta(seconds=elem["AwardTime"])}\n'
+            result_str += f'{"🔴" if elem["Negative"] else "🟢"}№{elem["Number"]} {elem["Name"] or ""} {elem["Help"] or ""} {elem["Answer"]["Answer"]} ({elem["Answer"]["Login"]}) {CUR_PARAMS[message.chat.id]["bonus_closers"].get(elem["BonusId"], "")} {"Штраф: " if elem["Negative"] else "Бонус: "} {datetime.timedelta(seconds=elem["AwardTime"])}\n'
         else:
-            result_str += f'{"✖Истёк" if elem["Expired"] else "❌"}№{elem["Number"]} {elem["Name"] or ""} {"Будет доступен через "+str(datetime.timedelta(seconds=elem["SecondsToStart"])) if elem["SecondsToStart"] != 0 else ""} {"Осталось на выполнение: "+str(datetime.timedelta(seconds=elem["SecondsLeft"])) if elem["SecondsLeft"] != 0 else ""}\n'
+            result_str += f'{"✖Истёк" if elem["Expired"] else "❌"}№{elem["Number"]} {elem["Name"] or ""} {elem["Task"] or ""} {"Будет доступен через "+str(datetime.timedelta(seconds=elem["SecondsToStart"])) if elem["SecondsToStart"] != 0 else ""} {"Осталось на выполнение: "+str(datetime.timedelta(seconds=elem["SecondsLeft"])) if elem["SecondsLeft"] != 0 else ""}\n'
     if result_str == '':
         result_str = 'Нет бонусов'
+
+    result_str = add_coords_copy(parse_html(result_str) if CUR_PARAMS[message.chat.id]['parser'] else result_str)
 
     for i in range(0, len(result_str), TASK_MAX_LEN):
         BOT.send_message(message.chat.id, result_str[i:i + TASK_MAX_LEN])
@@ -642,8 +692,8 @@ def get_hints(message):
     result_str = ''
     try:
         game_json = CUR_PARAMS[message.chat.id]['session'].get(f'https://{CUR_PARAMS[message.chat.id]["cur_domain"]}/GameEngines/Encounter/Play/{CUR_PARAMS[message.chat.id]["cur_json"]["GameId"]}?json=1').json()
-    except:
-        BOT.send_message(message.chat.id, 'Ошибка, возможно необходимо заново авторизоваться')
+    except Exception as e:
+        BOT.send_message(message.chat.id, f'Ошибка, возможно необходимо заново авторизоваться {e}')
         return
 
     if game_json['Event'] != 0:
@@ -657,8 +707,7 @@ def get_hints(message):
             result_str += f'Подсказка {elem["Number"]}: Будет через {datetime.timedelta(seconds=elem["RemainSeconds"])}\n{"_"*30}\n\n'
     if result_str == '':
         result_str = 'Нет подсказок'
-    #BOT.send_message(message.chat.id, result_str)
-    BOT.send_message(message.chat.id, add_coords_copy(result_str), parse_mode='HTML')
+    BOT.send_message(message.chat.id, add_coords_copy(parse_html(result_str) if CUR_PARAMS[message.chat.id]['parser'] else result_str), parse_mode='HTML')
 
 
 @BOT.message_handler(commands=['task'])
@@ -668,13 +717,33 @@ def get_task(message):
     get_hints(message)
 
 
-@BOT.message_handler(commands=['screen'])
-def get_screen(message):
-    if CUR_PARAMS[message.chat.id]['driver']:
-        CUR_PARAMS[message.chat.id]['driver'].get(f'https://{CUR_PARAMS[message.chat.id]["cur_domain"]}/GameEngines/Encounter/Play/{CUR_PARAMS[message.chat.id]["cur_json"]["GameId"]}?lang={LANG}')
-        BOT.send_photo(message.chat.id, base64.b64decode(CUR_PARAMS[message.chat.id]['driver'].get_full_page_screenshot_as_base64()))
+def send_screen(chat_id, link, full=False):
+    if CUR_PARAMS[chat_id]['driver']:
+        CUR_PARAMS[chat_id]['driver'].get(link)
     else:
-        BOT.send_message(message.chat.id, 'Виртуальный браузер не запущен')
+        BOT.send_message(chat_id, 'Виртуальный браузер не запущен')
+        return
+    driver = CUR_PARAMS[chat_id]['driver']
+    if full:
+        css_h = driver.execute_script("return document.documentElement.scrollHeight;")
+        dpr = driver.execute_script("return window.devicePixelRatio || 1;")
+        pixel_h = int(css_h * dpr)
+        if pixel_h < MAX_SCREEN_HEIGHT:
+            BOT.send_photo(chat_id, base64.b64decode(CUR_PARAMS[chat_id]['driver'].get_full_page_screenshot_as_base64()))
+        else:
+            screenshot_bytes = base64.b64decode(driver.get_full_page_screenshot_as_base64())
+            file_data = io.BytesIO(screenshot_bytes)
+            file_data.name = f'level{CUR_PARAMS[chat_id]['cur_json']['Level']['Number']}.png'
+            BOT.send_document(chat_id, file_data, caption='Полный скрин')
+            file_data.close()
+    else:
+        BOT.send_photo(chat_id, base64.b64decode(driver.get_screenshot_as_base64()))
+
+
+@BOT.message_handler(commands=['screen', 'fscreen', 'скрин', 'фскрин'])
+def get_screen(message):
+    full = message.text[1:].split()[0].split('@')[0].lower() in ['fscreen', 'фскрин']
+    send_screen(message.chat.id, f'https://{CUR_PARAMS[message.chat.id]["cur_domain"]}/GameEngines/Encounter/Play/{CUR_PARAMS[message.chat.id]["cur_json"]["GameId"]}?lang={LANG}', full)
 
 
 @BOT.message_handler(commands=['open_browser'])
@@ -682,8 +751,10 @@ def start_browser(message):
     my_options = Options()
     my_options.set_preference("general.useragent.override", USER_AGENT['User-agent'])
     my_driver = webdriver.Firefox(options=my_options)
-    my_driver.get(f'https://{CUR_PARAMS[message.chat.id]["cur_domain"]}')
-    my_driver.add_cookie({'name': 'atoken', 'value': CUR_PARAMS[message.chat.id]['session'].cookies.get_dict()['atoken'], 'domain': '.en.cx', 'secure': False, 'httpOnly': True, 'session': True})
+    # my_driver.get(f'https://{CUR_PARAMS[message.chat.id]["cur_domain"]}')
+    my_driver.get(f'https://{CUR_PARAMS[message.chat.id]["cur_domain"]}/GameEngines/Encounter/Play/{CUR_PARAMS[message.chat.id]["cur_json"]["GameId"]}')
+    # my_driver.add_cookie({'name': 'atoken', 'value': CUR_PARAMS[message.chat.id]['session'].cookies.get_dict()['atoken'], 'domain': '.en.cx', 'secure': False, 'httpOnly': True, 'session': True})
+    my_driver.add_cookie({'name': 'atoken', 'value': CUR_PARAMS[message.chat.id]['session'].cookies.get_dict()['atoken'], 'domain': '.' + CUR_PARAMS[message.chat.id]['cur_domain'], 'secure': False, 'httpOnly': True, 'session': True})
     my_driver.add_cookie({'name': 'stoken', 'value': CUR_PARAMS[message.chat.id]['session'].cookies.get_dict()['stoken'], 'domain': '.' + CUR_PARAMS[message.chat.id]['cur_domain'], 'secure': False, 'httpOnly': False, 'session': True})
     my_driver.get(f'https://{CUR_PARAMS[message.chat.id]["cur_domain"]}/GameEngines/Encounter/Play/{CUR_PARAMS[message.chat.id]["cur_json"]["GameId"]}')
 
@@ -731,15 +802,17 @@ def send_answer(message):
 
     sectors_list = []
     bonus_list = []
-    answer = message.text[2:] if (message.text[1] == '!' and CUR_PARAMS[message.chat.id]['cur_json']['Level']['HasAnswerBlockRule']) else message.text[1:]
+    hasanswerblockrule = CUR_PARAMS[message.chat.id]['cur_json']['Level']['HasAnswerBlockRule']
+    code_in_block = CUR_PARAMS[message.chat.id]['code_in_block']
+    answer = message.text[2:] if (message.text[1] == '!' and hasanswerblockrule) else message.text[1:]
 
     # Если блокировка, нет бонусов и ответ не с !:
-    if CUR_PARAMS[message.chat.id]['cur_json']['Level']['HasAnswerBlockRule'] and (len(CUR_PARAMS[message.chat.id]["cur_json"]["Level"]["Bonuses"]) == 0) and message.text[1] != '!':
+    if hasanswerblockrule and (len(CUR_PARAMS[message.chat.id]["cur_json"]["Level"]["Bonuses"]) == 0) and message.text[1] != '!' and not code_in_block:
         BOT.send_message(message.chat.id, 'На уровне блокировка, в сектор вбивайте самостоятельно или через /!')
         return
-
+    
     # По умолчанию вбивать в бонус при блокировке, если ответ без !
-    if CUR_PARAMS[message.chat.id]['cur_json']['Level']['HasAnswerBlockRule'] and message.text[1] != '!':
+    if hasanswerblockrule and message.text[1] != '!' and not code_in_block:
         answer_type = 'BonusAction'
         BOT.send_message(message.chat.id, 'На уровне блокировка, вбиваю в бонус, в сектор вбивайте самостоятельно или через /!')
     else:
@@ -751,8 +824,8 @@ def send_answer(message):
             'LevelId': CUR_PARAMS[message.chat.id]["cur_json"]['Level']['LevelId'],
             'LevelNumber': CUR_PARAMS[message.chat.id]["cur_json"]['Level']['Number'],
             answer_type + '.answer': answer}).json()
-    except:
-        BOT.send_message(message.chat.id, 'Ошибка, возможно необходимо заново авторизоваться')
+    except Exception as e:
+        BOT.send_message(message.chat.id, f'Ошибка, возможно необходимо заново авторизоваться:\n{e}')
         return
 
     if answer_json['Event'] != 0:
