@@ -22,7 +22,7 @@ import random
 # Читаем конфиг
 config = configparser.ConfigParser()
 config.read('settings.ini')
-ADMIN_USERNAMES = tuple(config['Settings']['Admins'].split(','))  # Администраторы, которым разрешена авторизация бота в чате
+ADMIN_USERNAMES = tuple(map(lambda s: s.strip().lower(), config['Settings']['Admins'].split(',')))  # Администраторы, которым разрешена авторизация бота в чате
 SECTORS_LEFT_ALERT = int(config['Settings']['Sectors_left_alert'])  # Количество оставшихся для закрытия секторов, с которого выводить оповещение, сколько осталось
 USER_AGENT = {'User-agent': config['Settings']['User_agent']}  # Выставляемый в requests и selenium user-agent
 TASK_MAX_LEN = int(config['Settings']['Task_max_len'])  # Максимальное кол-во символов в одном сообщении, если превышает, то разбивается на несколько
@@ -62,7 +62,7 @@ def modify_message(bot_instance, message):
         message.text = '/incorrect_chat'
         return
     # Запрет авторизации и загрузки из файла от всех, кроме админов, перенаправляем INCORRECT_USER
-    if cmd in ('auth', 'stop_auth', 'load_old_json', 'open_browser', 'leave_chat') and message.from_user.username not in ADMIN_USERNAMES:
+    if cmd in ('auth', 'stop_auth', 'load_old_json', 'open_browser', 'leave_chat') and message.from_user.username.lower() not in ADMIN_USERNAMES:
         message.text = '/incorrect_user'
         return
 
@@ -163,26 +163,26 @@ def send_kml_info(cur_chat, parse_text, level_num):
 
 # Отправить информацию о текущем уровне
 def send_curlevel_info(cur_chat, cur_json):
+    cur_level = cur_json["Level"]
     # Выводим информацию о номере уровня, автопереходе, блокировке ответов
-    gameinfo_str = f'Уровень {cur_json["Level"]["Number"]} из {len(cur_json["Levels"])} {cur_json["Level"]["Name"]}\n'
-    gameinfo_str += f'Выполнить секторов: {cur_json["Level"]["RequiredSectorsCount"] if cur_json["Level"]["RequiredSectorsCount"] > 0 else 1} из {len(cur_json["Level"]["Sectors"]) if len(cur_json["Level"]["Sectors"]) > 0 else 1}\n'
-    if cur_json["Level"]["Messages"]:
+    gameinfo_str = f'Уровень {cur_level["Number"]} из {len(cur_json["Levels"])} {cur_level["Name"]}\n'
+    gameinfo_str += f'Выполнить секторов: {cur_level["RequiredSectorsCount"] if cur_level["RequiredSectorsCount"] > 0 else 1} из {len(cur_level["Sectors"]) if len(cur_level["Sectors"]) > 0 else 1}\n'
+    if cur_level["Messages"]:
         gameinfo_str += 'Сообщения на уровне:\n'
-        for elem in cur_json["Level"]["Messages"]:
+        for elem in cur_level["Messages"]:
             gameinfo_str += elem["MessageText"]+'\n'
 
-    if cur_json["Level"]["Timeout"] > 0:
-        gameinfo_str += f'Автопереход через {datetime.timedelta(seconds=cur_json["Level"]["Timeout"])}\n'
+    if cur_level["Timeout"] > 0:
+        gameinfo_str += f'Автопереход через {datetime.timedelta(seconds=cur_level["Timeout"])}\n'
     else:
         gameinfo_str += 'Автопереход отсутствует\n'
-    if cur_json["Level"]["HasAnswerBlockRule"]:
-        gameinfo_str += f'ВНИМАНИЕ, БЛОКИРОВКА ОТВЕТОВ! НЕ БОЛЕЕ {cur_json["Level"]["AttemtsNumber"]} ПОПЫТОК ЗА {datetime.timedelta(seconds=cur_json["Level"]["AttemtsPeriod"])} ДЛЯ {"КОМАНДЫ" if cur_json["Level"]["BlockTargetId"] == 2 else "ИГРОКА"}'
+    if cur_level["HasAnswerBlockRule"]:
+        gameinfo_str += f'ВНИМАНИЕ, БЛОКИРОВКА ОТВЕТОВ! НЕ БОЛЕЕ {cur_level["AttemtsNumber"]} ПОПЫТОК ЗА {datetime.timedelta(seconds=cur_level["AttemtsPeriod"])} ДЛЯ {"КОМАНДЫ" if cur_level["BlockTargetId"] == 2 else "ИГРОКА"}'
     BOT.send_message(cur_chat, gameinfo_str)
 
     # Отдельно выводим задание
-    if len(cur_json['Level']['Tasks']) > 0:
-        # gamelevel_str = cur_json['Level']['Tasks'][0]['TaskText']
-        gamelevel_str = add_coords_copy(parse_html(cur_json['Level']['Tasks'][0]['TaskText']) if CUR_PARAMS[cur_chat]['parser'] else cur_json['Level']['Tasks'][0]['TaskText'])
+    if len(cur_level['Tasks']) > 0:
+        gamelevel_str = add_coords_copy(parse_html(cur_level['Tasks'][0]['TaskText']) if CUR_PARAMS[cur_chat]['parser'] else cur_level['Tasks'][0]['TaskText'])
     else:
         gamelevel_str = 'Нет заданий на уровне'
 
@@ -192,8 +192,9 @@ def send_curlevel_info(cur_chat, cur_json):
 
 
 def check_engine(cur_chat_id):
+    cur_chat_params = CUR_PARAMS[cur_chat_id]
     try:
-        game_json = CUR_PARAMS[cur_chat_id]["session"].get(f'https://{CUR_PARAMS[cur_chat_id]["cur_domain"]}/GameEngines/Encounter/Play/{CUR_PARAMS[cur_chat_id]["cur_json"]["GameId"]}?json=1&lang={LANG}').json()
+        game_json = cur_chat_params["session"].get(f'https://{cur_chat_params["cur_domain"]}/GameEngines/Encounter/Play/{cur_chat_params["cur_json"]["GameId"]}?json=1&lang={LANG}').json()
     except Exception as e:
         BOT.send_message(cur_chat_id, f'Ошибка мониторинга, возможно необходимо заново авторизоваться:\n{e}')
         return
@@ -211,7 +212,7 @@ def check_engine(cur_chat_id):
             return True  # игра еще не началась, продолжаем мониторить
         case 6 | 17:
             BOT.send_message(cur_chat_id, 'Игра закончилась')
-            CUR_PARAMS[cur_chat_id]['monitoring_flag'] = False
+            cur_chat_params['monitoring_flag'] = False
             sleep(7)
             BOT.send_message(cur_chat_id, 'Авторизация чата отключена')
             CUR_PARAMS.pop(cur_chat_id, None)  # Освобождаем в памяти словарь чата
@@ -247,8 +248,8 @@ def check_engine(cur_chat_id):
             check_engine(cur_chat_id)
             return True  # все секторы выполнены
         case 0:
-            old_json = CUR_PARAMS[cur_chat_id]['cur_json']  # предыдущий json
-            CUR_PARAMS[cur_chat_id]['cur_json'] = game_json  # текущий json
+            old_json = cur_chat_params['cur_json']  # предыдущий json
+            cur_chat_params['cur_json'] = game_json  # текущий json
 
             # Игра началась
             if old_json['Level'] is None:
@@ -258,16 +259,16 @@ def check_engine(cur_chat_id):
 
             # Проверка, что поменялся номер уровня, т.е. произошел АП
             if old_json['Level']['Number'] != game_json['Level']['Number']:
-                CUR_PARAMS[cur_chat_id]['5_min_sent'] = False
-                CUR_PARAMS[cur_chat_id]['1_min_sent'] = False
-                BOT.send_message(cur_chat_id, 'АП!\n' + ' '.join(CUR_PARAMS[cur_chat_id].get('players', '')))
-                if CUR_PARAMS[cur_chat_id]['send_screen']:
-                    send_screen(cur_chat_id, f'https://{CUR_PARAMS[cur_chat_id]["cur_domain"]}/GameEngines/Encounter/Play/{CUR_PARAMS[cur_chat_id]["cur_json"]["GameId"]}?lang={LANG}', full=True)
+                cur_chat_params['5_min_sent'] = False
+                cur_chat_params['1_min_sent'] = False
+                BOT.send_message(cur_chat_id, 'АП!\n' + ' '.join(cur_chat_params.get('players', '')))
+                if cur_chat_params['send_screen']:
+                    send_screen(cur_chat_id, f'https://{cur_chat_params["cur_domain"]}/GameEngines/Encounter/Play/{cur_chat_params["cur_json"]["GameId"]}?lang={LANG}', full=True)
 
                 # отключение ввода кодов при обнаружении штрафных
                 if len(game_json['Level']['Tasks']) > 0:
                     if any(item in game_json['Level']['Tasks'][0]['TaskText'].lower() for item in STOP_ACCEPT_CODES_WORDS):
-                        CUR_PARAMS[cur_chat_id]['accept_codes'] = False
+                        cur_chat_params['accept_codes'] = False
                         BOT.send_message(cur_chat_id, 'В тексте обнаружена информация о штрафах, ввод кодов отключен! Для включения выполните /accept_codes')
 
                 send_curlevel_info(cur_chat_id, game_json)
@@ -275,13 +276,13 @@ def check_engine(cur_chat_id):
                     send_kml_info(cur_chat_id, game_json['Level']['Tasks'][0]['TaskText'], game_json['Level']['Number'])
 
                 # Сохраняем информацию о пройденном уровне
-                CUR_PARAMS[cur_chat_id]['OLD_LEVELS'][str(old_json['Level']['Number'])] = {}
-                CUR_PARAMS[cur_chat_id]['OLD_LEVELS'][str(old_json['Level']['Number'])]['Event'] = old_json['Event']
-                CUR_PARAMS[cur_chat_id]['OLD_LEVELS'][str(old_json['Level']['Number'])]['Level'] = old_json['Level']
+                cur_chat_params['OLD_LEVELS'][str(old_json['Level']['Number'])] = {}
+                cur_chat_params['OLD_LEVELS'][str(old_json['Level']['Number'])]['Event'] = old_json['Event']
+                cur_chat_params['OLD_LEVELS'][str(old_json['Level']['Number'])]['Level'] = old_json['Level']
 
                 # Запись в файл
-                json_file_data = CUR_PARAMS[cur_chat_id]['OLD_LEVELS']
-                json_filename = f'{cur_chat_id}.{CUR_PARAMS[cur_chat_id]["cur_json"]["GameId"]}'
+                json_file_data = cur_chat_params['OLD_LEVELS']
+                json_filename = f'{cur_chat_id}.{cur_chat_params["cur_json"]["GameId"]}'
                 if os.path.isfile('level_snapshots/'+json_filename):
                     with open('level_snapshots/'+json_filename) as json_file:
                         json_file_data.update(json.load(json_file))
@@ -296,7 +297,7 @@ def check_engine(cur_chat_id):
             # проверка на сообщения на уровне:
             for elem in game_json['Level']['Messages']:
                 if elem not in old_json['Level']['Messages']:
-                    BOT.send_message(cur_chat_id, f'Добавлено сообщение: {parse_html(elem["MessageText"]) if CUR_PARAMS[cur_chat_id]['parser'] else elem["MessageText"]}')
+                    BOT.send_message(cur_chat_id, f'Добавлено сообщение: {parse_html(elem["MessageText"]) if cur_chat_params['parser'] else elem["MessageText"]}')
 
             # проверка на количество секторов на уровне:
             if len(old_json['Level']['Sectors']) != len(game_json['Level']['Sectors']):
@@ -317,39 +318,39 @@ def check_engine(cur_chat_id):
                 BOT.send_message(cur_chat_id, f'Осталось секторов: [{cur_sectors_left}]. Оставшиеся: {", ".join(sector_list)}')
 
             # Проверка, что пришла подсказка
-            if len(CUR_PARAMS[cur_chat_id]["cur_json"]['Level']['Helps']) != len(old_json['Level']['Helps']):
+            if len(cur_chat_params["cur_json"]['Level']['Helps']) != len(old_json['Level']['Helps']):
                 BOT.send_message(cur_chat_id, 'Была добавлена подсказка')
             else:
-                for i, elem in enumerate(CUR_PARAMS[cur_chat_id]["cur_json"]['Level']['Helps']):
+                for i, elem in enumerate(cur_chat_params["cur_json"]['Level']['Helps']):
                     if elem['HelpText'] != old_json['Level']['Helps'][i]['HelpText']:
                         # BOT.send_message(cur_chat_id, f'Подсказка {i + 1}: {elem["HelpText"]}')
-                        BOT.send_message(cur_chat_id, f'Подсказка {i + 1}: {add_coords_copy(parse_html(elem["HelpText"]) if CUR_PARAMS[cur_chat_id]['parser'] else elem["HelpText"])}', parse_mode='HTML')
-                        send_kml_info(cur_chat_id, elem["HelpText"], f'{CUR_PARAMS[cur_chat_id]["cur_json"]["Level"]["Number"]}_{i+1}')
+                        BOT.send_message(cur_chat_id, f'Подсказка {i + 1}: {add_coords_copy(parse_html(elem["HelpText"]) if cur_chat_params['parser'] else elem["HelpText"])}', parse_mode='HTML')
+                        send_kml_info(cur_chat_id, elem["HelpText"], f'{cur_chat_params["cur_json"]["Level"]["Number"]}_{i+1}')
 
             # мониторинг закрытия секторов
-            if CUR_PARAMS[cur_chat_id]['sector_monitor']:
+            if cur_chat_params['sector_monitor']:
                 sector_msg = ''
                 for elem in game_json['Level']['Sectors']:
-                    if elem not in old_json['Level']['Sectors'] and elem["IsAnswered"] and (elem['SectorId'] not in CUR_PARAMS[cur_chat_id]['sector_closers']):
+                    if elem not in old_json['Level']['Sectors'] and elem["IsAnswered"] and (elem['SectorId'] not in cur_chat_params['sector_closers']):
                         sector_msg += f'✅№{elem["Order"]} {elem["Name"]} {elem["Answer"]["Answer"]} ({elem["Answer"]["Login"]})\n'
                 if sector_msg != '':
                     BOT.send_message(cur_chat_id, sector_msg)
 
             # мониторинг закрытия бонусов
-            if CUR_PARAMS[cur_chat_id]['bonus_monitor']:
+            if cur_chat_params['bonus_monitor']:
                 for elem in game_json['Level']['Bonuses']:
-                    if elem not in old_json['Level']['Bonuses'] and elem["IsAnswered"] and (elem['BonusId'] not in CUR_PARAMS[cur_chat_id]['sector_closers']):
-                        BOT.send_message(cur_chat_id, f'{"🔴" if elem["Negative"] else "🟢"} №{elem["Number"]} {elem["Name"] or ""} {elem["Answer"]["Answer"]} ({elem["Answer"]["Login"]}) {"Штраф: " if elem["Negative"] else "Бонус: "} {datetime.timedelta(seconds=elem["AwardTime"])}\n{"Подсказка бонуса:" + chr(10) + add_coords_copy(parse_html(elem["Help"]) if CUR_PARAMS[cur_chat_id]['parser'] else elem["Help"]) if elem["Help"] else ""}', parse_mode='HTML')
+                    if elem not in old_json['Level']['Bonuses'] and elem["IsAnswered"] and (elem['BonusId'] not in cur_chat_params['sector_closers']):
+                        BOT.send_message(cur_chat_id, f'{"🔴" if elem["Negative"] else "🟢"} №{elem["Number"]} {elem["Name"] or ""} {elem["Answer"]["Answer"]} ({elem["Answer"]["Login"]}) {"Штраф: " if elem["Negative"] else "Бонус: "} {datetime.timedelta(seconds=elem["AwardTime"])}\n{"Подсказка бонуса:" + chr(10) + add_coords_copy(parse_html(elem["Help"]) if cur_chat_params['parser'] else elem["Help"]) if elem["Help"] else ""}', parse_mode='HTML')
                         if elem["Help"]:
-                            send_kml_info(cur_chat_id, elem["Help"], CUR_PARAMS[cur_chat_id]["cur_json"]["Level"]["Number"])
+                            send_kml_info(cur_chat_id, elem["Help"], cur_chat_params["cur_json"]["Level"]["Number"])
 
             # мониторинг времени до автоперехода
-            if TIMELEFT_ALERT1 > game_json['Level']['TimeoutSecondsRemain'] > 0 and not (CUR_PARAMS[cur_chat_id]['5_min_sent']):
+            if TIMELEFT_ALERT1 > game_json['Level']['TimeoutSecondsRemain'] > 0 and not (cur_chat_params['5_min_sent']):
                 BOT.send_message(cur_chat_id, 'До автоперехода осталось менее 5 минут!')
-                CUR_PARAMS[cur_chat_id]['5_min_sent'] = True
-            if TIMELEFT_ALERT2 > game_json['Level']['TimeoutSecondsRemain'] > 0 and not (CUR_PARAMS[cur_chat_id]['1_min_sent']):
+                cur_chat_params['5_min_sent'] = True
+            if TIMELEFT_ALERT2 > game_json['Level']['TimeoutSecondsRemain'] > 0 and not (cur_chat_params['1_min_sent']):
                 BOT.send_message(cur_chat_id, 'До автоперехода осталось менее 1 минуты!')
-                CUR_PARAMS[cur_chat_id]['1_min_sent'] = True
+                cur_chat_params['1_min_sent'] = True
     return True
 
 
