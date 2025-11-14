@@ -162,3 +162,5 @@ cython_debug/
 .idea/
 level_snapshots/
 start_en_bot.bat
+tg_settings.ini
+en_settings.ini

@@ -5,7 +5,7 @@ author: Temig (https://world.en.cx/UserDetails.aspx?uid=154783)
 
 Версия 1.3:
 - Бот переписан на aiogram
-- Все взаимодействие с движком вынесено в отдельный класс EncounterBot, он общий для Vk и Tg версии ботов
+- Все взаимодействие с движком вынесено в отдельный класс EncounterBot, он общий для Vk (https://github.com/temig74/en_vk_bot) и Tg версии ботов
 - Мелкие улучшения
 
 Версия 1.2:
