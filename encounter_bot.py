@@ -6,16 +6,12 @@ import asyncio
 import datetime
 import aiohttp
 import logging
-from selenium import webdriver
-from selenium.webdriver.firefox.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 import re
 import os
 import json
 from typing import Awaitable, Callable, Any
 import random
-from time import sleep
+from playwright.async_api import async_playwright, Browser
 
 EN_AUTH_ERRORS = {
     1: 'Превышено количество неправильных попыток авторизации',
@@ -114,36 +110,57 @@ def gen_kml2(text: str) -> tuple[io.BytesIO | None, list | None]:
 
 
 class EncounterBot:
-    def __init__(self, message_func: Callable[[Any, [str | io.BytesIO | list[Any]]], Awaitable[None]]):
-        config = configparser.ConfigParser()
-        config.read('en_settings.ini', encoding='utf-8')
-        self.globalconfig = dict()
-        self.globalconfig['SECTORS_LEFT_ALERT'] = int(config['Settings']['Sectors_left_alert'])
-        self.globalconfig['USER_AGENT'] = config['Settings']['User_agent']
-        self.globalconfig['LANG'] = config['Settings']['Lang']
-        self.globalconfig['CHECK_INTERVAL'] = int(config['Settings']['Check_interval'])
-        self.globalconfig['TIMELEFT_ALERT1'] = int(config['Settings']['Timeleft_alert1'])
-        self.globalconfig['TIMELEFT_ALERT2'] = int(config['Settings']['Timeleft_alert2'])
-        self.globalconfig['STOP_ACCEPT_CODES_WORDS'] = tuple(config['Settings']['Stop_accept_codes_words'].split(','))
-        self.globalconfig['USE_BROWSER'] = True if config['Settings']['Use_browser'].lower() == 'true' else False
-        self.globalconfig['YANDEX_API_KEY'] = config['Settings']['Yandex_api_key']
-        with open('yandex_api.txt', 'r', encoding='utf8') as yandex_api_file:
-            self.globalconfig['YANDEX_API_PATTERN'] = yandex_api_file.read()
-        self.globalconfig['MAP_TYPE'] = config['Settings']['Map_type']
-        self.globalconfig['MAP_BROWSER_SLEEP'] = int(config['Settings']['Map_browser_sleep'])
-        self.globalconfig['MAP_BROWSER_TIMEOUT'] = int(config['Settings']['Map_browser_timeout'])
-
+    def __init__(self, message_func: Callable[[Any, [str | io.BytesIO | list[Any]]], Awaitable[None]], browser: Browser | None, globalconfig: dict):
+        """ message_func - функция для отправки сообщений, которая будет вызываться в случае необходимости отправки сообщения в чат.
+        Должна быть с двумя параметрами peer_id и message, возвращающая None. В ней самостоятельно реализовать отправку для разных типов мессенджеров
+        Там же можно обработать сплит сообщений на несколько, если оно длинное и прочее. В message будет или текстовая строка, или файл в BytesIO (например для отправки kml файлов и скринов) или координаты"""
+        self.message_func = message_func
+        self.browser = browser
+        self.globalconfig = globalconfig
         self.cur_chats = dict()
 
-        '''Функция для отправки сообщений, которая будет вызываться в случае необходимости отправки сообщения в чат.
-        Должна быть с двумя параметрами peer_id и message, возвращающая None. В ней самостоятельно реализовать отправку для разных типов мессенджеров
-        Там же можно обработать сплит сообщений на несколько, если оно длинное и прочее. В message будет или текстовая строка, или файл в BytesIO (например для отправки kml файлов и скринов) или координаты
-        '''
-        self.message_func = message_func
+    # Создание класса вынесено в фабрику, т.к. нужно асинхронно создать один глобальный браузер для всех сессий
+    @classmethod
+    async def create(cls, message_func: Callable[[Any, [str | io.BytesIO | list[Any]]], Awaitable[None]]):
+        config = configparser.ConfigParser()
+        config.read('en_settings.ini', encoding='utf-8')
+        globalconfig = dict()
+        globalconfig['SECTORS_LEFT_ALERT'] = int(config['Settings']['Sectors_left_alert'])
+        globalconfig['USER_AGENT'] = config['Settings']['User_agent']
+        globalconfig['LANG'] = config['Settings']['Lang']
+        globalconfig['CHECK_INTERVAL'] = int(config['Settings']['Check_interval'])
+        globalconfig['TIMELEFT_ALERT1'] = int(config['Settings']['Timeleft_alert1'])
+        globalconfig['TIMELEFT_ALERT2'] = int(config['Settings']['Timeleft_alert2'])
+        globalconfig['STOP_ACCEPT_CODES_WORDS'] = tuple(config['Settings']['Stop_accept_codes_words'].split(','))
+        globalconfig['USE_BROWSER'] = True if config['Settings']['Use_browser'].lower() == 'true' else False
+        globalconfig['YANDEX_API_KEY'] = config['Settings']['Yandex_api_key']
+        with open('yandex_api.txt', 'r', encoding='utf8') as yandex_api_file:
+            globalconfig['YANDEX_API_PATTERN'] = yandex_api_file.read()
+        globalconfig['MAP_TYPE'] = config['Settings']['Map_type']
+        globalconfig['MAP_BROWSER_SLEEP'] = int(config['Settings']['Map_browser_sleep'])
+        globalconfig['MAP_BROWSER_TIMEOUT'] = int(config['Settings']['Map_browser_timeout'])
+        globalconfig['BROWSER_TYPE'] = config['Settings']['Browser_type']
+        if globalconfig['USE_BROWSER']:
+            p = await async_playwright().start()
+            if globalconfig['BROWSER_TYPE'] == 'firefox':
+                browser = await p.firefox.launch(headless=True)
+            elif globalconfig['BROWSER_TYPE'] == 'chromium':
+                browser = await p.chromium.launch(headless=True)
+            else:
+                browser = await p.firefox.launch(headless=True)  # по умолчанию firefox
+            logging.info('Виртуальный браузер запущен')
+        else:
+            browser = None
 
         folder_path = os.path.join(os.curdir, 'level_snapshots')
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
+
+        return cls(message_func=message_func, browser=browser, globalconfig=globalconfig)
+
+    async def close(self):
+        if self.browser:
+            await self.browser.close()
 
     async def send_kml_info(self, peer_id: str | int, text_to_parse: str, level_num: str | int) -> None:
         kml_file, coords_list = gen_kml2(text_to_parse)
@@ -164,16 +181,18 @@ class EncounterBot:
             await self.message_func(peer_id, full_route)
         chat_data['last_coords'] = coords_list[0]
 
-    def get_route_screen(self, peer_id: str | int, start_coords, end_coords) -> tuple[io.BytesIO, io.BytesIO] | None:
+    async def get_route_screen_async(self, peer_id: str | int, start_coords, end_coords) -> tuple[io.BytesIO, io.BytesIO] | None:
         if start_coords == end_coords:
             return
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             return
-
-        fox = chat_data.get('driver')
-        if not fox:
-            return
+        if not (my_page := chat_data.get('browser', {}).get('page', None)):
+            if context := chat_data.get('browser', {}).get('context', None):
+                my_page = await context.new_page()
+                chat_data['browser']['page'] = my_page
+            else:
+                return
 
         api_pattern = self.globalconfig['YANDEX_API_PATTERN']
         api_key = self.globalconfig['YANDEX_API_KEY']
@@ -181,21 +200,25 @@ class EncounterBot:
         browser_timeout = self.globalconfig['MAP_BROWSER_TIMEOUT']
         browser_sleep = self.globalconfig['MAP_BROWSER_SLEEP']
 
-        html_bs64 = base64.b64encode(api_pattern.replace('#coords1', f'{start_coords[0]},{start_coords[1]}').replace('#coords2', f'{end_coords[0]}, {end_coords[1]}').replace('#my_api_key', api_key).replace('#bounds_flag', 'false').replace('#map_type', map_type).replace('loaded', 'loaded1').encode('utf-8')).decode()
-        fox.get('data:text/html;base64,' + html_bs64)
-        WebDriverWait(fox, browser_timeout).until(EC.title_is('loaded1'))
-        sleep(browser_sleep)
-        img_route_start = io.BytesIO(base64.b64decode(fox.get_full_page_screenshot_as_base64()))
+        html_bs64_1 = base64.b64encode(api_pattern.replace('#coords1', f'{start_coords[0]},{start_coords[1]}').replace('#coords2', f'{end_coords[0]}, {end_coords[1]}').replace('#my_api_key', api_key).replace('#bounds_flag', 'false').replace('#map_type', map_type).replace('loaded', 'loaded1').encode('utf-8')).decode()
+        await my_page.goto('data:text/html;base64,' + html_bs64_1)
+        try:
+            await my_page.wait_for_function("document.title === 'loaded1'", timeout=browser_timeout * 1000)
+        except TimeoutError:
+            return
+        await my_page.wait_for_timeout(browser_sleep * 1000)
+        img_route_start = io.BytesIO(await my_page.screenshot(full_page=True, type='png'))
 
-        html_bs64 = base64.b64encode(api_pattern.replace('#coords1', f'{start_coords[0]},{start_coords[1]}').replace('#coords2', f'{end_coords[0]}, {end_coords[1]}').replace('#my_api_key', api_key).replace('#bounds_flag', 'true').replace('#map_type', map_type).replace('loaded', 'loaded2').encode('utf-8')).decode()
-        fox.get('data:text/html;base64,' + html_bs64)
-        WebDriverWait(fox, browser_timeout).until(EC.title_is('loaded2'))
-        sleep(browser_sleep)
-        img_route_full = io.BytesIO(base64.b64decode(fox.get_full_page_screenshot_as_base64()))
+        html_bs64_2 = base64.b64encode(api_pattern.replace('#coords1', f'{start_coords[0]},{start_coords[1]}').replace('#coords2', f'{end_coords[0]}, {end_coords[1]}').replace('#my_api_key', api_key).replace('#bounds_flag', 'true').replace('#map_type', map_type).replace('loaded', 'loaded2').encode('utf-8')).decode()
+        await my_page.goto('data:text/html;base64,' + html_bs64_2)
+        try:
+            await my_page.wait_for_function("document.title === 'loaded2'", timeout=browser_timeout * 1000)
+        except TimeoutError:
+            return
+        await my_page.wait_for_timeout(browser_sleep * 1000)
+        img_route_full = io.BytesIO(await my_page.screenshot(full_page=True, type='png'))
+
         return img_route_start, img_route_full
-
-    async def get_route_screen_async(self, peer_id: str | int, start_coords: list[str, str] | tuple[str, str], end_coords: list[str, str] | tuple[str, str]) -> tuple[io.BytesIO, io.BytesIO] | None:
-        return await asyncio.to_thread(self.get_route_screen, peer_id, start_coords, end_coords)
 
     async def set_coords(self, peer_id, coords: list[str, str] | tuple[str, str]):
         chat_data = self.cur_chats.get(peer_id)
@@ -208,47 +231,33 @@ class EncounterBot:
         await self.message_func(peer_id, f'Координаты установлены: {coords[0], coords[1]}')
 
     # Получение скринов
-    def get_screen_as_bytes(self, peer_id: str | int, full=False) -> io.BytesIO | None:
-        if not self.cur_chats.get(peer_id):
+    async def get_screen_as_bytes_async(self, peer_id: str | int, full: bool = False, w_article: str | None = None) -> io.BytesIO | None:
+        chat_data = self.cur_chats.get(peer_id)
+        if not chat_data:
+            await self.message_func(peer_id, 'Чат не авторизован')
             return
-        if not (driver := self.cur_chats[peer_id].get('driver')):
-            return
-        driver.get(f'https://{self.cur_chats[peer_id]["cur_domain"]}/GameEngines/Encounter/Play/{self.cur_chats[peer_id]["cur_json"]["GameId"]}?lang={self.globalconfig['LANG']}')
-        css_h = driver.execute_script("return document.documentElement.scrollHeight;")
-        dpr = driver.execute_script("return window.devicePixelRatio || 1;")
+        if not (my_page := chat_data.get('browser', {}).get('page', None)):
+            if context := chat_data.get('browser', {}).get('context', None):
+                my_page = await context.new_page()
+                chat_data['browser']['page'] = my_page
+            else:
+                return
+        if w_article:
+            url = 'https://ru.wikipedia.org/wiki/'+w_article
+        else:
+            url = f'https://{self.cur_chats[peer_id]["cur_domain"]}/GameEngines/Encounter/Play/{self.cur_chats[peer_id]["cur_json"]["GameId"]}?lang={self.globalconfig['LANG']}'
+        await my_page.goto(url)
+
+        css_h = await my_page.evaluate("() => document.documentElement.scrollHeight")
+        dpr = await my_page.evaluate("() => window.devicePixelRatio || 1")
         pixel_h = int(css_h * dpr)
         if full:
-            img_buffer = io.BytesIO(base64.b64decode(driver.get_full_page_screenshot_as_base64()))
+            img_buffer = io.BytesIO(await my_page.screenshot(full_page=True, type='png'))
         else:
-            img_buffer = io.BytesIO(base64.b64decode(driver.get_screenshot_as_base64()))
+            img_buffer = io.BytesIO(await my_page.screenshot(full_page=False, type='png'))
             pixel_h = 683
-        img_buffer.name = f'{pixel_h}_screen_file.png'
+        img_buffer.name = f'{pixel_h}_{w_article or "screen_file"}.png'
         return img_buffer
-
-    # Оборачиваем получение скринов в асинхронную обертку, т.к. Selenium синхронный
-    async def get_screen_as_bytes_async(self, peer_id: str | int, full: bool = False) -> io.BytesIO | None:
-        return await asyncio.to_thread(self.get_screen_as_bytes, peer_id, full)
-
-    def get_res_screen_as_bytes(self, peer_id: str | int, article: str, full: bool = False) -> io.BytesIO | None:
-        if not self.cur_chats.get(peer_id):
-            return
-        if not (driver := self.cur_chats[peer_id].get('driver')):
-            return
-        base_url = 'https://ru.wikipedia.org/wiki/'
-        driver.get(base_url+article)
-        css_h = driver.execute_script("return document.documentElement.scrollHeight;")
-        dpr = driver.execute_script("return window.devicePixelRatio || 1;")
-        pixel_h = int(css_h * dpr)
-        if full:
-            img_buffer = io.BytesIO(base64.b64decode(driver.get_full_page_screenshot_as_base64()))
-        else:
-            img_buffer = io.BytesIO(base64.b64decode(driver.get_screenshot_as_base64()))
-            pixel_h = 683
-        img_buffer.name = f'{pixel_h}_{article}.png'
-        return img_buffer
-
-    async def get_res_screen_as_bytes_async(self, peer_id: str | int, article: str, full: bool = False) -> io.BytesIO | None:
-        return await asyncio.to_thread(self.get_res_screen_as_bytes, peer_id, article, full)
 
     # Возвращает страницы с информацией о текущем уровне. Перед вызовом нужно освежить текущий json
     async def get_curlevel_info(self, peer_id: str | int) -> tuple[str, str] | None:
@@ -330,23 +339,36 @@ class EncounterBot:
             '5_min_sent': False,
             '1_min_sent': False,
             'old_levels': {},
-            'driver': None,
+            'browser': {'context': None, 'page': None},
             'sector_closers': {},
             'bonus_closers': {},
             'last_coords': None}
 
-        if self.globalconfig['USE_BROWSER']:
-            # запускаем firefox браузер, который будем использовать для скриншотов уровня
-            options = Options()
-            options.add_argument("--headless")  # не отображаемый в системе
-            options.set_preference("general.useragent.override", self.globalconfig['USER_AGENT'])
-            my_driver = webdriver.Firefox(options=options)
-            my_driver.get(f'https://{domain}/GameEngines/Encounter/Play/{game_id}')
-            my_driver.add_cookie({'name': 'atoken', 'value': get_cookie('atoken', my_session), 'domain': '.' + domain, 'secure': False, 'httpOnly': True, 'session': True})
-            my_driver.add_cookie({'name': 'stoken', 'value': get_cookie('stoken', my_session), 'domain': '.' + domain, 'secure': False, 'httpOnly': False, 'session': True})
-            self.cur_chats[peer_id]['driver'] = my_driver
-            logging.info(f'Виртуальный браузер запущен: домен {domain} игра {game_id} id_чата:{peer_id}')
-            await self.message_func(peer_id, f'Виртуальный браузер запущен')
+        if self.globalconfig['USE_BROWSER'] and self.browser:
+            user_agent = self.globalconfig['USER_AGENT']
+            cookies_to_set = [
+                {
+                    'name': 'atoken',
+                    'value': get_cookie('atoken', my_session),
+                    'domain': domain,
+                    'path': '/',
+                    'secure': False,
+                    'httpOnly': True
+                },
+                {
+                    'name': 'stoken',
+                    'value': get_cookie('stoken', my_session),
+                    'domain': domain,
+                    'path': '/',
+                    'secure': False,
+                    'httpOnly': False
+                }
+            ]
+            context = await self.browser.new_context(user_agent=user_agent, storage_state={'cookies': cookies_to_set})
+            my_page = await context.new_page()
+            self.cur_chats[peer_id]['browser']['context'] = context
+            self.cur_chats[peer_id]['browser']['page'] = my_page
+
         return True
 
     async def stop_auth(self, peer_id: str | int) -> bool:
@@ -468,13 +490,36 @@ class EncounterBot:
             await self.message_func(peer_id, 'Чат не авторизован')
             return False
         if self.globalconfig['USE_BROWSER']:
-            my_options = Options()
-            my_options.set_preference("general.useragent.override", self.globalconfig['USER_AGENT'])
-            my_driver = webdriver.Firefox(options=my_options)
-            my_driver.get(f'https://{chat_data["cur_domain"]}/GameEngines/Encounter/Play/{chat_data["cur_json"]["GameId"]}')
-            my_driver.add_cookie({'name': 'atoken', 'value': get_cookie('atoken', chat_data['session']), 'domain': '.' + chat_data['cur_domain'], 'secure': False, 'httpOnly': True, 'session': True})
-            my_driver.add_cookie({'name': 'stoken', 'value': get_cookie('stoken', chat_data['session']), 'domain': '.' + chat_data['cur_domain'], 'secure': False, 'httpOnly': False, 'session': True})
-            my_driver.get(f'https://{chat_data["cur_domain"]}/GameEngines/Encounter/Play/{chat_data["cur_json"]["GameId"]}')
+            user_agent = self.globalconfig['USER_AGENT']
+            cookies_to_set = [
+                {
+                    'name': 'atoken',
+                    'value': get_cookie('atoken', chat_data['session']),
+                    'domain': chat_data['cur_domain'],
+                    'path': '/',
+                    'secure': False,
+                    'httpOnly': True
+                },
+                {
+                    'name': 'stoken',
+                    'value': get_cookie('stoken', chat_data['session']),
+                    'domain': chat_data['cur_domain'],
+                    'path': '/',
+                    'secure': False,
+                    'httpOnly': False
+                }
+            ]
+            p = await async_playwright().start()
+            if self.globalconfig['BROWSER_TYPE'] == 'firefox':
+                browser = await p.firefox.launch(headless=False)
+            elif self.globalconfig['BROWSER_TYPE'] == 'chromium':
+                browser = await p.chromium.launch(headless=False)
+            else:
+                browser = await p.firefox.launch(headless=False)  # по умолчанию firefox
+            logging.info('Виртуальный браузер запущен')
+            context = await browser.new_context(user_agent=user_agent, storage_state={'cookies': cookies_to_set})
+            my_page = await context.new_page()
+            await my_page.goto(f'https://{chat_data["cur_domain"]}/GameEngines/Encounter/Play/{chat_data["cur_json"]["GameId"]}')
             await self.message_func(peer_id, 'Браузер запущен')
             return True
         else:
