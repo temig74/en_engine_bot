@@ -13,7 +13,7 @@ from selenium.webdriver.support import expected_conditions as EC
 import re
 import os
 import json
-from typing import Awaitable, Callable, Any, Union
+from typing import Awaitable, Callable, Any
 import random
 from time import sleep
 
@@ -55,13 +55,13 @@ EN_EVENT_ERRORS = {
 }
 
 
-def get_cookie(cookie_name, session):
+def get_cookie(cookie_name: str, session: aiohttp.ClientSession) -> str:
     for cookie in session.cookie_jar:
         if cookie.key == cookie_name:
             return cookie.value
 
 
-def parse_html(html_content, parse_flag=True) -> str:
+def parse_html(html_content: str, parse_flag: bool = True) -> str:
     if not parse_flag:
         return html_content
     try:
@@ -137,7 +137,7 @@ class EncounterBot:
 
         '''Функция для отправки сообщений, которая будет вызываться в случае необходимости отправки сообщения в чат.
         Должна быть с двумя параметрами peer_id и message, возвращающая None. В ней самостоятельно реализовать отправку для разных типов мессенджеров
-        Там же можно обработать сплит сообщений на несколько, если оно длинное и прочее. В message будет или текстовая строка, или файл в BytesIO (например для отправки kml файлов и скринов) 
+        Там же можно обработать сплит сообщений на несколько, если оно длинное и прочее. В message будет или текстовая строка, или файл в BytesIO (например для отправки kml файлов и скринов) или координаты
         '''
         self.message_func = message_func
 
@@ -145,7 +145,7 @@ class EncounterBot:
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
 
-    async def send_kml_info(self, peer_id, text_to_parse, level_num):
+    async def send_kml_info(self, peer_id: str | int, text_to_parse: str, level_num: str | int) -> None:
         kml_file, coords_list = gen_kml2(text_to_parse)
         if not kml_file:
             return
@@ -164,7 +164,7 @@ class EncounterBot:
             await self.message_func(peer_id, full_route)
         chat_data['last_coords'] = coords_list[0]
 
-    def get_route_screen(self, peer_id, start_coords, end_coords):
+    def get_route_screen(self, peer_id: str | int, start_coords, end_coords) -> tuple[io.BytesIO, io.BytesIO] | None:
         if start_coords == end_coords:
             return
         chat_data = self.cur_chats.get(peer_id)
@@ -194,10 +194,10 @@ class EncounterBot:
         img_route_full = io.BytesIO(base64.b64decode(fox.get_full_page_screenshot_as_base64()))
         return img_route_start, img_route_full
 
-    async def get_route_screen_async(self, peer_id, start_coords, end_coords):
+    async def get_route_screen_async(self, peer_id: str | int, start_coords: list[str, str] | tuple[str, str], end_coords: list[str, str] | tuple[str, str]) -> tuple[io.BytesIO, io.BytesIO] | None:
         return await asyncio.to_thread(self.get_route_screen, peer_id, start_coords, end_coords)
 
-    async def set_coords(self, peer_id, coords: list[str]):
+    async def set_coords(self, peer_id, coords: list[str, str] | tuple[str, str]):
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             await self.message_func(peer_id, 'Чат не авторизован')
@@ -208,7 +208,7 @@ class EncounterBot:
         await self.message_func(peer_id, f'Координаты установлены: {coords[0], coords[1]}')
 
     # Получение скринов
-    def get_screen_as_bytes(self, peer_id, full=False) -> io.BytesIO | None:
+    def get_screen_as_bytes(self, peer_id: str | int, full=False) -> io.BytesIO | None:
         if not self.cur_chats.get(peer_id):
             return
         if not (driver := self.cur_chats[peer_id].get('driver')):
@@ -226,10 +226,10 @@ class EncounterBot:
         return img_buffer
 
     # Оборачиваем получение скринов в асинхронную обертку, т.к. Selenium синхронный
-    async def get_screen_as_bytes_async(self, peer_id, full=False) -> io.BytesIO | None:
+    async def get_screen_as_bytes_async(self, peer_id: str | int, full: bool = False) -> io.BytesIO | None:
         return await asyncio.to_thread(self.get_screen_as_bytes, peer_id, full)
 
-    def get_res_screen_as_bytes(self, peer_id, article, full=False) -> io.BytesIO | None:
+    def get_res_screen_as_bytes(self, peer_id: str | int, article: str, full: bool = False) -> io.BytesIO | None:
         if not self.cur_chats.get(peer_id):
             return
         if not (driver := self.cur_chats[peer_id].get('driver')):
@@ -247,11 +247,11 @@ class EncounterBot:
         img_buffer.name = f'{pixel_h}_{article}.png'
         return img_buffer
 
-    async def get_res_screen_as_bytes_async(self, peer_id, article, full=False) -> io.BytesIO | None:
+    async def get_res_screen_as_bytes_async(self, peer_id: str | int, article: str, full: bool = False) -> io.BytesIO | None:
         return await asyncio.to_thread(self.get_res_screen_as_bytes, peer_id, article, full)
 
     # Возвращает страницы с информацией о текущем уровне. Перед вызовом нужно освежить текущий json
-    async def get_curlevel_info(self, peer_id) -> Union[tuple[str, str], None]:
+    async def get_curlevel_info(self, peer_id: str | int) -> tuple[str, str] | None:
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             await self.message_func(peer_id, 'Чат не авторизован')
@@ -285,7 +285,7 @@ class EncounterBot:
         return gameinfo_str, gamelevel_str
 
     # Авторизация на движке
-    async def auth(self, peer_id, domain, game_id, login, password) -> bool:
+    async def auth(self, peer_id: str | int, domain: str, game_id: str | int, login: str, password: str) -> bool:
         if session := self.cur_chats.get(peer_id, {}).get('session'):
             await session.close()
         my_session = aiohttp.ClientSession(headers={"User-Agent": self.globalconfig['USER_AGENT']})
@@ -349,7 +349,7 @@ class EncounterBot:
             await self.message_func(peer_id, f'Виртуальный браузер запущен')
         return True
 
-    async def stop_auth(self, peer_id) -> bool:
+    async def stop_auth(self, peer_id: str | int) -> bool:
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             await self.message_func(peer_id, 'Чат не авторизован')
@@ -361,7 +361,7 @@ class EncounterBot:
         await self.message_func(peer_id, 'Авторизация чата отключена')
         return True
 
-    async def get_hints(self, peer_id) -> Union[str, None]:
+    async def get_hints(self, peer_id: str | int) -> str | None:
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             await self.message_func(peer_id, 'Чат не авторизован')
@@ -389,12 +389,12 @@ class EncounterBot:
             result_str = 'Нет подсказок'
         return parse_html(result_str, chat_data.get('parser', False))
 
-    async def get_task(self, peer_id) -> Union[str, None]:
+    async def get_task(self, peer_id: str | int) -> str | None:
         await self.check_engine(peer_id)
         gameinfo_str, gamelevel_str = await self.get_curlevel_info(peer_id)
         return gamelevel_str
 
-    async def get_time(self, peer_id) -> Union[str, None]:
+    async def get_time(self, peer_id: str | int) -> str | None:
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             await self.message_func(peer_id, 'Чат не авторизован')
@@ -416,7 +416,7 @@ class EncounterBot:
             return
         return f'Автопереход через {datetime.timedelta(seconds=game_json["Level"]["TimeoutSecondsRemain"])}'
 
-    async def get_sectors_and_bonuses(self, peer_id, sector: bool = True, levelnum: str = '0', only_left: bool = False) -> str | None:
+    async def get_sectors_and_bonuses(self, peer_id: str | int, sector: bool = True, levelnum: str = '0', only_left: bool = False) -> str | None:
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             await self.message_func(peer_id, 'Чат не авторизован')
@@ -462,7 +462,7 @@ class EncounterBot:
                 result_str = 'Нет бонусов'
         return parse_html(result_str, chat_data.get('parser', False))
 
-    async def open_browser(self, peer_id) -> bool:
+    async def open_browser(self, peer_id: str | int) -> bool:
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             await self.message_func(peer_id, 'Чат не авторизован')
@@ -481,7 +481,7 @@ class EncounterBot:
             await self.message_func(peer_id, 'Браузер отключен в конфиге')
             return False
 
-    async def load_old_json(self, peer_id) -> bool:
+    async def load_old_json(self, peer_id: str | int) -> bool:
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             await self.message_func(peer_id, 'Чат не авторизован')
@@ -496,7 +496,7 @@ class EncounterBot:
             await self.message_func(peer_id, 'Файл не существует')
             return False
 
-    async def switch_flag(self, peer_id, flag_name: str, flag_state: bool) -> bool:
+    async def switch_flag(self, peer_id: str | int, flag_name: str, flag_state: bool) -> bool:
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             await self.message_func(peer_id, 'Чат не авторизован')
@@ -516,7 +516,7 @@ class EncounterBot:
         return True
 
     # список игроков для тегания например при АПе уровня
-    async def set_players(self, peer_id, players_list: list[str]) -> bool:
+    async def set_players(self, peer_id: str | int, players_list: list[str]) -> bool:
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             await self.message_func(peer_id, 'Чат не авторизован')
@@ -525,7 +525,7 @@ class EncounterBot:
         await self.message_func(peer_id, 'Список игроков установлен')
         return True
 
-    async def set_doc(self, peer_id, url: str) -> bool:
+    async def set_doc(self, peer_id: str | int, url: str | None) -> bool:
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             await self.message_func(peer_id, 'Чат не авторизован')
@@ -539,7 +539,7 @@ class EncounterBot:
             await self.message_func(peer_id, 'Ссылка на док удалена')
             return True
 
-    async def get_game_info(self, peer_id) -> str | None:
+    async def get_game_info(self, peer_id: str | int) -> str | None:
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             await self.message_func(peer_id, 'Чат не авторизован')
@@ -548,7 +548,7 @@ class EncounterBot:
         game_doc = chat_data.get('doc', 'Не установлен')
         return f'Ссылка на игру: {game_link} \nСсылка на док: {game_doc} \n'
 
-    async def send_answer(self, peer_id, from_id, answer: str, send_to_sector: bool = False) -> Union[str, None]:
+    async def send_answer(self, peer_id: str | int, from_id: str | int, answer: str, send_to_sector: bool = False) -> str | None:
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             await self.message_func(peer_id, 'Чат не авторизован')
@@ -622,7 +622,7 @@ class EncounterBot:
         await self.check_engine(peer_id)
         return result_str
 
-    async def check_engine(self, peer_id) -> bool:  # False - если цикл мониторинга надо прервать (Серьезная ошибка), True - если продолжать
+    async def check_engine(self, peer_id: str | int) -> bool:  # False - если цикл мониторинга надо прервать (Серьезная ошибка), True - если продолжать
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             return False
@@ -776,7 +776,7 @@ class EncounterBot:
                     chat_data['1_min_sent'] = True
         return True
 
-    async def monitoring_func(self, peer_id):
+    async def monitoring_func(self, peer_id: str | int) -> None:
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             await self.message_func(peer_id, 'Чат не авторизован')
@@ -794,16 +794,18 @@ class EncounterBot:
         chat_data['monitoring_flag'] = False
         await self.message_func(peer_id, 'Мониторинг выключен')
 
-    async def game_monitor(self, peer_id, state: bool):
+    async def game_monitor(self, peer_id: str | int, state: bool) -> bool:
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             await self.message_func(peer_id, 'Чат не авторизован')
-            return
+            return False
         if not state:
             chat_data['monitoring_flag'] = False
         else:
             if not chat_data['monitoring_flag']:
                 chat_data['monitoring_flag'] = True
                 asyncio.create_task(self.monitoring_func(peer_id))
+                return True
             else:
                 await self.message_func(peer_id, 'Слежение уже запущено')
+                return True
