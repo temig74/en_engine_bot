@@ -164,7 +164,7 @@ async def cmd_stop_auth(message: Message, peer_id: int, from_: str):
 
 @dp.message(CmdFilter(['get_id'], [0]))
 async def cmd_get_id(message: Message, peer_id: int, from_: str):
-    await message.answer(f'id чата: {peer_id}\nпользователь: {from_}')
+    await message.answer(f'id чата: <code>{peer_id}</code>\nпользователь: {from_}', parse_mode='HTML')
 
 
 @dp.message(CmdFilter(['h', 'hints'], [0]))
