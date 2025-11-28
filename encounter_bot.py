@@ -12,6 +12,7 @@ import json
 from typing import Awaitable, Callable, Any
 import random
 from playwright.async_api import async_playwright, Browser
+from urllib.parse import urlparse, parse_qs, urlencode
 
 EN_AUTH_ERRORS = {
     1: 'Превышено количество неправильных попыток авторизации',
@@ -89,24 +90,96 @@ def parse_html(html_content: str, parse_flag: bool = True) -> str:
     return text_content
 
 
-def gen_kml2(text: str) -> tuple[io.BytesIO | None, list | None]:
-    coord_list = re.findall(r'-?\d{1,2}\.\d{3,10}[, ]*-?\d{1,3}\.\d{3,10}', text)
-    if not coord_list:
-        return None, None
-    result_list = []
+def get_yandex_constructor(script_html):
+    match = re.search(r'src="(https://api-maps.yandex.ru/services/constructor.*?)"', script_html)
+    if match:
+        script_src_url = match.group(1)
+        script_src_url = script_src_url.replace('&amp;', '&')
+        parsed_url = urlparse(script_src_url)
+        query_params = parse_qs(parsed_url.query)
+        um_value = query_params.get('um', [None])[0]
+        if um_value:
+            yandex_maps_base_url = "https://yandex.ru/maps/"
+            target_params = {
+                "from": "mapframe",
+                "source": "mapframe",
+                "utm_source": "mapframe",
+                "um": um_value
+            }
+            encoded_params = urlencode(target_params)
+            final_yandex_maps_url = f"{yandex_maps_base_url}?{encoded_params}"
+            return final_yandex_maps_url
+
+
+def generate_kml(coord_list: list[list]) -> str:
     kml = '<kml><Document>'
-    for cnt, elem in enumerate(coord_list):
-        c = re.findall(r'-?\d{1,3}\.\d{3,10}', elem)
-        new_point = f'<Point><coordinates>{c[1]},{c[0]},0.0</coordinates></Point>'
-        if new_point not in kml:
-            kml += f'<Placemark><name>Point {cnt+1}</name>{new_point}</Placemark>'
-            result_list.append((c[0], c[1]))
+    for elem in coord_list:
+        kml += f'<Placemark><name>{elem[0]}</name><Point><coordinates>{elem[2]},{elem[1]},0.0</coordinates></Point></Placemark>'
     kml += '</Document></kml>'
-    # buf_file = io.StringIO()
-    # buf_file.write(kml)
-    buf_file = io.BytesIO(kml.encode('utf-8'))
-    buf_file.seek(0, 0)
-    return buf_file, result_list  # Возвращаем кортеж из файла kml и списка координат
+    return kml
+
+
+async def parse_yandex_constructor(url: str):
+    headers = {"User-Agent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers) as resp:
+            html_content = await resp.read()
+    soup = BeautifulSoup(html_content, 'lxml')
+    script_tag = soup.find('script', {'type': 'application/json', 'class': 'state-view'})
+
+    if script_tag:
+        json_string = script_tag.string
+        try:
+            data = json.loads(json_string)
+            named_coords = []
+            for elem in data['config']['userMap']['features']:
+                title = elem.get('title')
+                subtitle = elem.get('subtitle')
+                latitude = str(elem.get('coordinates', ['0.0', '0.0'])[1])[:7]
+                longitude = str(elem.get('coordinates', ['0.0', '0.0'])[0])[:7]
+                named_coords.append([f'{title}|{subtitle}', latitude, longitude])
+            return named_coords
+        except Exception as e:
+            return None
+
+
+async def gen_kml2(text: str) -> dict:
+    numbered_coord_list = []
+    buf_file = None
+    buf_file_constr = None
+    constr_named_coords = []
+
+    raw_coord_pairs = re.findall(r'-?\d{1,2}\.\d{3,10}[, ]*-?\d{1,3}\.\d{3,10}', text)
+    seen_coords = set()
+    cnt = 0
+    if raw_coord_pairs:
+        for raw_pair_str in raw_coord_pairs:
+            match = re.search(r'(-?\d{1,2}\.\d{3,10})[, ]*(-?\d{1,3}\.\d{3,10})', raw_pair_str)
+            if match:
+                lat, lon = match.groups()
+                coord_tuple = (lat, lon)
+                if coord_tuple not in seen_coords:
+                    seen_coords.add(coord_tuple)
+                    cnt += 1
+                    numbered_coord_list.append([cnt, lat, lon])
+
+        kml = generate_kml(numbered_coord_list)
+        buf_file = io.BytesIO(kml.encode('utf-8'))
+        buf_file.seek(0, 0)
+
+    yandex_constructor_url = get_yandex_constructor(text)
+    if yandex_constructor_url:
+        constr_named_coords = await parse_yandex_constructor(yandex_constructor_url)
+        constr_kml = generate_kml(constr_named_coords)
+        buf_file_constr = io.BytesIO(constr_kml.encode('utf-8'))
+        buf_file_constr.seek(0, 0)
+
+    return {'kml_file': buf_file,
+            'coords': numbered_coord_list,
+            'yandex_constructor_url': yandex_constructor_url,
+            'kml_file_constr': buf_file_constr,
+            'coords_constr': constr_named_coords
+            }
 
 
 class EncounterBot:
@@ -163,23 +236,39 @@ class EncounterBot:
             await self.browser.close()
 
     async def send_kml_info(self, peer_id: str | int, text_to_parse: str, level_num: str | int) -> None:
-        kml_file, coords_list = gen_kml2(text_to_parse)
-        if not kml_file:
-            return
+        kml_parse = await gen_kml2(text_to_parse)
+        kml_file = kml_parse.get('kml_file')
 
-        kml_file.name = f'points{level_num}.kml'
-        await self.message_func(peer_id, kml_file)
-        await self.message_func(peer_id, coords_list)
+        if kml_file:
+            coords_list = kml_parse.get('coords')
+            kml_file.name = f'points{level_num}.kml'
+            await self.message_func(peer_id, kml_file)
+            await self.message_func(peer_id, coords_list[0][1:])
 
-        # Построитель маршрутов
-        chat_data = self.cur_chats.get(peer_id)
-        if chat_data and chat_data['route_builder'] and chat_data['last_coords']:
-            start_route, full_route = await self.get_route_screen_async(peer_id, chat_data['last_coords'], coords_list[0])
-            start_route.name = f'start_route{level_num}.png'
-            full_route.name = f'full_route{level_num}.png'
-            await self.message_func(peer_id, start_route)
-            await self.message_func(peer_id, full_route)
-        chat_data['last_coords'] = coords_list[0]
+            # Построитель маршрутов
+            chat_data = self.cur_chats.get(peer_id)
+            if chat_data and chat_data['route_builder'] and chat_data['last_coords']:
+                if routes := await self.get_route_screen_async(peer_id, chat_data['last_coords'], coords_list[0][1:]):
+                    start_route, full_route = routes
+                    start_route.name = f'start_route{level_num}.png'
+                    full_route.name = f'full_route{level_num}.png'
+                    await self.message_func(peer_id, start_route)
+                    await self.message_func(peer_id, full_route)
+            chat_data['last_coords'] = coords_list[0][1:]
+
+        yandex_constr_url = kml_parse.get('yandex_constructor_url')
+        if yandex_constr_url:
+            await self.message_func(peer_id, f'Обнаружена ссылка на Яндекс конструктор: {yandex_constr_url}')
+            kml_file_constr = kml_parse.get('kml_file_constr')
+            if kml_file_constr:
+                kml_file_constr.name = f'constr{level_num}.kml'
+                await self.message_func(peer_id, kml_file_constr)
+            coords_constr = kml_parse.get('coords_constr')
+            if coords_constr:
+                coord_str = ''
+                for elem in coords_constr:
+                    coord_str += f'{elem[0]} {elem[1]} {elem[2]}\n'
+                await self.message_func(peer_id, coord_str)
 
     async def get_route_screen_async(self, peer_id: str | int, start_coords, end_coords) -> tuple[io.BytesIO, io.BytesIO] | None:
         if start_coords == end_coords:
@@ -246,7 +335,7 @@ class EncounterBot:
             url = 'https://ru.wikipedia.org/wiki/'+w_article
         else:
             url = f'https://{self.cur_chats[peer_id]["cur_domain"]}/GameEngines/Encounter/Play/{self.cur_chats[peer_id]["cur_json"]["GameId"]}?lang={self.globalconfig['LANG']}'
-        await my_page.goto(url)
+        await my_page.goto(url, wait_until='networkidle', timeout=7000)
 
         css_h = await my_page.evaluate("() => document.documentElement.scrollHeight")
         dpr = await my_page.evaluate("() => window.devicePixelRatio || 1")

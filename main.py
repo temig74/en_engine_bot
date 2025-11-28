@@ -74,7 +74,7 @@ async def sender_function(peer_id, message):
         else:
             await TG_BOT.send_document(peer_id, buf_file)
     if isinstance(message, list):
-        await TG_BOT.send_location(peer_id, message[0][0], message[0][1])
+        await TG_BOT.send_location(peer_id, message[0], message[1])
 
 
 # далее команды бота
@@ -225,8 +225,9 @@ async def cmd_set_doc(message: Message, args: list[str], peer_id: int):
 
 
 @dp.message(CmdFilter(['set_coords'], [2]))
-async def cmd_set_doc(message: Message, args: list[str, str], peer_id: int):
-    await EN_BOT.set_coords(peer_id, args)
+async def cmd_set_coords(message: Message, peer_id: int):
+    coords = message.text.replace(',', ' ').split()[1:3]
+    await EN_BOT.set_coords(peer_id, coords)
 
 
 @dp.message(CmdFilter(['game_info'], [0]))
