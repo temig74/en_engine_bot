@@ -103,6 +103,7 @@ async def cmd_help(message: Message):
     /send_screen [0] - включить/[выключить] отправку скрина нового уровня
     /send_code_in_block [0] - включить/[выключить] отправку кодов в сектор при блокировке (без !)
     /route_builder [0] - включить/[выключить] автомобильный построитель маршрутов. Необходим Api-ключ Яндекса "JavaScript API и HTTP Геокодер"
+    /up_full_screen [0] - включить/[выключить] полноэкранный скриншот при апе уровня (если снятие скриншотов включено)
     /set_coords xx.xxxxxx yy.yyyyyy - установить текущие координаты (для построителя маршрутов)
     /time - оставшееся время до апа
     /load_old_json - загрузить информацию о прошедших уровнях игры из файла (при перезапуске бота)
@@ -208,7 +209,7 @@ async def cmd_load_old_json(message: Message, peer_id: int):
     await EN_BOT.load_old_json(peer_id)
 
 
-@dp.message(CmdFilter(['accept_codes', 'sector_monitor', 'bonus_monitor', 'send_screen', 'parser', 'send_code_in_block', 'route_builder'], [0, 1]))
+@dp.message(CmdFilter(['accept_codes', 'sector_monitor', 'bonus_monitor', 'send_screen', 'parser', 'send_code_in_block', 'route_builder', 'up_full_screen'], [0, 1]))
 async def switch_flag(message: Message, command: str, args: list[str], peer_id: int):
     switch = False if (args and args[0] == '0') else True
     await EN_BOT.switch_flag(peer_id, command, switch)
