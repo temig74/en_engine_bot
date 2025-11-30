@@ -431,7 +431,9 @@ class EncounterBot:
             'browser': {'context': None, 'page': None},
             'sector_closers': {},
             'bonus_closers': {},
-            'last_coords': None}
+            'last_coords': None,
+            'up_full_screen': True
+        }
 
         if self.globalconfig['USE_BROWSER'] and self.browser:
             user_agent = self.globalconfig['USER_AGENT']
@@ -642,6 +644,7 @@ class EncounterBot:
              'parser': 'Парсер HTML',
              'send_code_in_block': 'Отправка кодов в сектор при блоке',
              'route_builder': 'Построитель маршрутов',
+             'up_full_screen': 'Отправка полных скринов при апе'
              }
         if flag_name not in chat_data:
             return False
@@ -813,7 +816,7 @@ class EncounterBot:
                     await self.message_func(peer_id, 'АП!\n' + ' '.join(chat_data.get('players', '')))
 
                     if chat_data['send_screen']:
-                        await self.message_func(peer_id, await self.get_screen_as_bytes_async(peer_id, full=True))
+                        await self.message_func(peer_id, await self.get_screen_as_bytes_async(peer_id, full=chat_data['up_full_screen']))
 
                     # отключение ввода кодов при обнаружении штрафных
                     if len(game_json['Level']['Tasks']) > 0:
