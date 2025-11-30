@@ -568,7 +568,8 @@ class EncounterBot:
         else:
             for elem in game_json['Level']['Bonuses']:
                 if elem['IsAnswered']:
-                    result_str += f'{"🔴" if elem["Negative"] else "🟢"}№{elem["Number"]} {elem["Name"] or ""} [{elem["Help"] or ""}] {elem["Answer"]["Answer"]} ({elem["Answer"]["Login"]}) {chat_data["bonus_closers"].get(elem["BonusId"], "")} {"Штраф: " if elem["Negative"] else "Бонус: "} {datetime.timedelta(seconds=elem["AwardTime"])}\n'
+                    if not only_left:
+                        result_str += f'{"🔴" if elem["Negative"] else "🟢"}№{elem["Number"]} {elem["Name"] or ""} [{elem["Help"] or ""}] {elem["Answer"]["Answer"]} ({elem["Answer"]["Login"]}) {chat_data["bonus_closers"].get(elem["BonusId"], "")} {"Штраф: " if elem["Negative"] else "Бонус: "} {datetime.timedelta(seconds=elem["AwardTime"])}\n'
                 else:
                     result_str += f'{"✖Истёк" if elem["Expired"] else "❌"}№{elem["Number"]} {elem["Name"] or ""} {elem["Task"] or ""} {"Будет доступен через " + str(datetime.timedelta(seconds=elem["SecondsToStart"])) if elem["SecondsToStart"] != 0 else ""} {"Осталось на выполнение: " + str(datetime.timedelta(seconds=elem["SecondsLeft"])) if elem["SecondsLeft"] != 0 else ""}\n'
             if result_str == '':
