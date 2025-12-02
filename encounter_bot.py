@@ -503,9 +503,9 @@ class EncounterBot:
         return parse_html(result_str, chat_data.get('parser', False))
 
     async def get_task(self, peer_id: str | int) -> str | None:
-        await self.check_engine(peer_id)
-        gameinfo_str, gamelevel_str = await self.get_curlevel_info(peer_id)
-        return gamelevel_str
+        if await self.check_engine(peer_id) != 'UP':
+            gameinfo_str, gamelevel_str = await self.get_curlevel_info(peer_id)
+            return gamelevel_str
 
     async def get_time(self, peer_id: str | int) -> str | None:
         chat_data = self.cur_chats.get(peer_id)
@@ -583,6 +583,7 @@ class EncounterBot:
             return False
         if self.globalconfig['USE_BROWSER']:
             user_agent = self.globalconfig['USER_AGENT']
+            # parent_domain = '.'.join(chat_data['cur_domain'].split('.')[1:])
             cookies_to_set = [
                 {
                     'name': 'atoken',
@@ -760,7 +761,7 @@ class EncounterBot:
         await self.check_engine(peer_id)
         return result_str
 
-    async def check_engine(self, peer_id: str | int) -> bool:  # False - если цикл мониторинга надо прервать (Серьезная ошибка), True - если продолжать
+    async def check_engine(self, peer_id: str | int) -> bool | str:  # False - если цикл мониторинга надо прервать (Серьезная ошибка), True - если продолжать
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             return False
@@ -846,7 +847,7 @@ class EncounterBot:
                     with open('level_snapshots/' + json_filename, 'w') as json_file:
                         json.dump(json_file_data, json_file)
 
-                    return True
+                    return 'UP'
 
                 # проверка на изменение текста уровня
                 if old_json['Level']['Tasks'] != game_json['Level']['Tasks']:

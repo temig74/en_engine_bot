@@ -271,6 +271,8 @@ async def cmd_leave_chat(message: Message, args: list[str], from_: str):
 
 @dp.message(F.content_type == ContentType.TEXT)
 async def send_answer(message: Message):
+    if message.text[0] != '/':
+        return
     answer = message.text[1:]
     if answer[0] == '!':
         answer = answer[1:]
