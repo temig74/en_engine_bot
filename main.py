@@ -280,7 +280,7 @@ async def cmd_set_level(message: Message, args: list[str], peer_id: int):
 
 
 @dp.message(CmdFilter(['levels'], [0]))
-async def cmd_set_level(message: Message, args: list[str], peer_id: int):
+async def cmd_levels(message: Message, args: list[str], peer_id: int):
     await EN_BOT.get_level_list(peer_id)
 
 
