@@ -66,7 +66,7 @@ def parse_html(html_content: str, parse_flag: bool = True) -> str:
         for img_tag in soup.find_all('img'):
             src = img_tag.get('src')
             if src:
-                inline_image_text = f"[Img: {src}]"
+                inline_image_text = f"[Img: {src} ]"
                 img_tag.replace_with(inline_image_text + " ")
             else:
                 img_tag.decompose()
