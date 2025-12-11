@@ -334,7 +334,7 @@ class EncounterBot:
         if w_article:
             url = 'https://ru.wikipedia.org/wiki/'+w_article
         else:
-            url = f'https://{self.cur_chats[peer_id]["cur_domain"]}/GameEngines/Encounter/Play/{self.cur_chats[peer_id]["cur_json"]["GameId"]}?lang={self.globalconfig['LANG']}'
+            url = f'https://{self.cur_chats[peer_id]["cur_domain"]}/GameEngines/Encounter/Play/{self.cur_chats[peer_id]["cur_json"]["GameId"]}?lang={self.globalconfig['LANG']}{'&level='+str(self.cur_chats[peer_id]['shturm_level_num']) if self.cur_chats[peer_id]['shturm_level_num'] > 0 else ''}'
         await my_page.goto(url, wait_until='networkidle', timeout=7000)
 
         css_h = await my_page.evaluate("() => document.documentElement.scrollHeight")
@@ -432,7 +432,8 @@ class EncounterBot:
             'sector_closers': {},
             'bonus_closers': {},
             'last_coords': None,
-            'up_full_screen': True
+            'up_full_screen': True,
+            'shturm_level_num': 0
         }
 
         if self.globalconfig['USE_BROWSER'] and self.browser:
@@ -480,7 +481,7 @@ class EncounterBot:
             await self.message_func(peer_id, 'Чат не авторизован')
             return
         try:
-            async with chat_data['session'].get(f'https://{chat_data["cur_domain"]}/GameEngines/Encounter/Play/{chat_data["cur_json"]["GameId"]}?json=1') as response:
+            async with chat_data['session'].get(f'https://{chat_data["cur_domain"]}/GameEngines/Encounter/Play/{chat_data["cur_json"]["GameId"]}?json=1{'&level='+str(self.cur_chats[peer_id]['shturm_level_num']) if self.cur_chats[peer_id]['shturm_level_num'] > 0 else ''}') as response:
                 response.raise_for_status()
                 game_json = await response.json()
         except Exception as e:
@@ -513,7 +514,7 @@ class EncounterBot:
             await self.message_func(peer_id, 'Чат не авторизован')
             return
         try:
-            async with chat_data['session'].get(f'https://{chat_data["cur_domain"]}/GameEngines/Encounter/Play/{chat_data["cur_json"]["GameId"]}?json=1') as response:
+            async with chat_data['session'].get(f'https://{chat_data["cur_domain"]}/GameEngines/Encounter/Play/{chat_data["cur_json"]["GameId"]}?json=1{'&level='+str(self.cur_chats[peer_id]['shturm_level_num']) if self.cur_chats[peer_id]['shturm_level_num'] > 0 else ''}') as response:
                 response.raise_for_status()
                 game_json = await response.json()
         except Exception as e:
@@ -542,7 +543,7 @@ class EncounterBot:
                 return
         else:
             try:
-                async with chat_data['session'].get(f'https://{chat_data["cur_domain"]}/GameEngines/Encounter/Play/{chat_data["cur_json"]["GameId"]}?json=1') as response:
+                async with chat_data['session'].get(f'https://{chat_data["cur_domain"]}/GameEngines/Encounter/Play/{chat_data["cur_json"]["GameId"]}?json=1{'&level='+str(self.cur_chats[peer_id]['shturm_level_num']) if self.cur_chats[peer_id]['shturm_level_num'] > 0 else ''}') as response:
                     response.raise_for_status()
                     game_json = await response.json()
             except Exception as e:
@@ -713,12 +714,12 @@ class EncounterBot:
             answer_type = 'LevelAction'
 
         try:
-            async with chat_data["session"].get(f'https://{chat_data["cur_domain"]}/GameEngines/Encounter/Play/{chat_data["cur_json"]["GameId"]}?json=1') as response:
+            async with chat_data["session"].get(f'https://{chat_data["cur_domain"]}/GameEngines/Encounter/Play/{chat_data["cur_json"]["GameId"]}?json=1{'&level='+str(self.cur_chats[peer_id]['shturm_level_num']) if self.cur_chats[peer_id]['shturm_level_num'] > 0 else ''}') as response:
                 response.raise_for_status()
                 old_json = await response.json()
             answer_data = {'LevelId': chat_data["cur_json"]['Level']['LevelId'], 'LevelNumber': chat_data["cur_json"]['Level']['Number'], answer_type + '.answer': answer}
 
-            async with chat_data['session'].post(f'https://{chat_data["cur_domain"]}/GameEngines/Encounter/Play/{chat_data["cur_json"]["GameId"]}?json=1', data=answer_data) as response:
+            async with chat_data['session'].post(f'https://{chat_data["cur_domain"]}/GameEngines/Encounter/Play/{chat_data["cur_json"]["GameId"]}?json=1{'&level='+str(self.cur_chats[peer_id]['shturm_level_num']) if self.cur_chats[peer_id]['shturm_level_num'] > 0 else ''}', data=answer_data) as response:
                 response.raise_for_status()
                 answer_json = await response.json()
         except Exception as e:
@@ -766,7 +767,7 @@ class EncounterBot:
         if not chat_data:
             return False
         try:
-            async with chat_data["session"].get(f'https://{chat_data["cur_domain"]}/GameEngines/Encounter/Play/{chat_data["cur_json"]["GameId"]}?json=1&lang={self.globalconfig['LANG']}') as response:
+            async with chat_data["session"].get(f'https://{chat_data["cur_domain"]}/GameEngines/Encounter/Play/{chat_data["cur_json"]["GameId"]}?json=1&lang={self.globalconfig['LANG']}{'&level='+str(self.cur_chats[peer_id]['shturm_level_num']) if self.cur_chats[peer_id]['shturm_level_num'] > 0 else ''}') as response:
                 response.raise_for_status()
                 game_json = await response.json()
         except (aiohttp.ClientConnectionError, asyncio.TimeoutError) as CE:
@@ -815,10 +816,12 @@ class EncounterBot:
                 if old_json['Level']['Number'] != game_json['Level']['Number']:
                     chat_data['5_min_sent'] = False
                     chat_data['1_min_sent'] = False
-                    await self.message_func(peer_id, 'АП!\n' + ' '.join(chat_data.get('players', '')))
 
-                    if chat_data['send_screen']:
-                        await self.message_func(peer_id, await self.get_screen_as_bytes_async(peer_id, full=chat_data['up_full_screen']))
+                    # Если последовательность не штурмовая (не указан штурмовой уровень), сообщаем об апе и отправляем скрин
+                    if chat_data['shturm_level_num'] == 0:
+                        await self.message_func(peer_id, 'АП!\n' + ' '.join(chat_data.get('players', '')))
+                        if chat_data['send_screen']:
+                            await self.message_func(peer_id, await self.get_screen_as_bytes_async(peer_id, full=chat_data['up_full_screen']))
 
                     # отключение ввода кодов при обнаружении штрафных
                     if len(game_json['Level']['Tasks']) > 0:
@@ -851,7 +854,7 @@ class EncounterBot:
 
                 # проверка на изменение текста уровня
                 if old_json['Level']['Tasks'] != game_json['Level']['Tasks']:
-                    await self.message_func(peer_id, 'Задание уровня изменилось)')
+                    await self.message_func(peer_id, 'Задание уровня изменилось')
 
                 # проверка на сообщения на уровне:
                 for elem in game_json['Level']['Messages']:
@@ -948,3 +951,27 @@ class EncounterBot:
             else:
                 await self.message_func(peer_id, 'Слежение уже запущено')
                 return True
+
+    async def set_level(self, peer_id: str | int, level_num: int) -> bool:
+        chat_data = self.cur_chats.get(peer_id)
+        if not chat_data:
+            await self.message_func(peer_id, 'Чат не авторизован')
+            return False
+        if not level_num:
+            chat_data['shturm_level_num'] = 0
+            return True
+        else:
+            chat_data['shturm_level_num'] = level_num
+            await self.message_func(peer_id, f'Установлен уровень №{level_num} в штурме')
+            return True
+
+    async def get_level_list(self, peer_id: str|int):
+        chat_data = self.cur_chats.get(peer_id)
+        if not chat_data:
+            await self.message_func(peer_id, 'Чат не авторизован')
+            return False
+        result_str = ''
+        for elem in chat_data['cur_json']['Levels']:
+            result_str += f'{'✅' if elem.get('IsPassed') else ''}{elem.get('LevelNumber')} {elem.get('LevelName')}\n'
+        await self.message_func(peer_id, result_str)
+
