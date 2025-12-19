@@ -433,7 +433,8 @@ class EncounterBot:
             'bonus_closers': {},
             'last_coords': None,
             'up_full_screen': True,
-            'shturm_level_num': 0
+            'shturm_level_num': 0,
+            'prefix': '/'
         }
 
         if self.globalconfig['USE_BROWSER'] and self.browser:
@@ -475,7 +476,7 @@ class EncounterBot:
         await self.message_func(peer_id, 'Авторизация чата отключена')
         return True
 
-    async def get_hints(self, peer_id: str | int) -> str | None:
+    async def get_hints(self, peer_id: str | int) -> tuple[str, str] | None:
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             await self.message_func(peer_id, 'Чат не авторизован')
@@ -493,20 +494,41 @@ class EncounterBot:
             await self.message_func(peer_id, f'{EN_EVENT_ERRORS.get(game_json['Event'])}')
             return
 
-        result_str = ''
+        current_hints = ''
+        future_hints = ''
         for elem in game_json['Level']['Helps']:
             if elem['RemainSeconds'] == 0:
-                result_str += f'Подсказка {elem["Number"]}:\n{elem["HelpText"]}\n{"_" * 30}\n\n'
+                current_hints += f'Подсказка {elem["Number"]}:\n{elem["HelpText"]}\n{"_" * 30}\n\n'
             else:
-                result_str += f'Подсказка {elem["Number"]}: Будет через {datetime.timedelta(seconds=elem["RemainSeconds"])}\n{"_" * 30}\n\n'
-        if result_str == '':
-            result_str = 'Нет подсказок'
-        return parse_html(result_str, chat_data.get('parser', False))
+                future_hints += f'Подсказка {elem["Number"]}: Будет через {datetime.timedelta(seconds=elem["RemainSeconds"])}\n{"_" * 30}\n\n'
+        if current_hints == '' and future_hints == '':
+            current_hints = 'Нет подсказок'
 
-    async def get_task(self, peer_id: str | int) -> str | None:
+        for elem in game_json['Level']['PenaltyHelps']:
+            if elem['RemainSeconds'] == 0:
+                current_hints += f'Штрафная подсказка {elem["Number"]} id: {elem["HelpId"]} {'не ' if elem["PenaltyHelpState"] == 0 else ''} открыта: Штраф {elem["Penalty"]} секунд\n{elem["HelpText"] if elem["HelpText"] else ''}\n{"_" * 30}\n\n'
+            else:
+                future_hints += f'Штрафная подсказка {elem["Number"]}: Будет через {datetime.timedelta(seconds=elem["RemainSeconds"])}\n{"_" * 30}\n\n'
+
+        return parse_html(current_hints, chat_data.get('parser', False)), parse_html(future_hints, chat_data.get('parser', False))
+
+    async def take_penalty_hint(self, peer_id: str | int, hint_id: str | int):
+        chat_data = self.cur_chats.get(peer_id)
+        if not chat_data:
+            await self.message_func(peer_id, 'Чат не авторизован')
+            return
+        try:
+            async with chat_data["session"].get(f'https://{chat_data["cur_domain"]}/GameEngines/Encounter/Play/{chat_data["cur_json"]["GameId"]}?json=1&pid={hint_id}&pact=1') as response:
+                response.raise_for_status()
+                if str(hint_id) in await response.text():
+                    await self.message_func(peer_id, 'Штрафная подсказка взята')
+        except:
+            await self.message_func(peer_id, 'Ошибка при взятии штрафной подсказки')
+
+    async def get_task(self, peer_id: str | int) -> tuple[str, str] | None:
         if await self.check_engine(peer_id) != 'UP':
             gameinfo_str, gamelevel_str = await self.get_curlevel_info(peer_id)
-            return gamelevel_str
+            return gameinfo_str, gamelevel_str
 
     async def get_time(self, peer_id: str | int) -> str | None:
         chat_data = self.cur_chats.get(peer_id)
@@ -526,9 +548,9 @@ class EncounterBot:
             await self.message_func(peer_id, f'{EN_EVENT_ERRORS.get(game_json['Event'])}')
             return
         if game_json["Level"]["Timeout"] == 0:
-            await self.message_func(peer_id, 'Автопереход отсутствует')
-            return
-        return f'Автопереход через {datetime.timedelta(seconds=game_json["Level"]["TimeoutSecondsRemain"])}'
+            return 'Автопереход отсутствует'
+        else:
+            return f'Автопереход через {datetime.timedelta(seconds=game_json["Level"]["TimeoutSecondsRemain"])}'
 
     async def get_sectors_and_bonuses(self, peer_id: str | int, sector: bool = True, levelnum: str = '0', only_left: bool = False) -> str | None:
         chat_data = self.cur_chats.get(peer_id)
@@ -678,6 +700,23 @@ class EncounterBot:
             chat_data['doc'] = ''
             await self.message_func(peer_id, 'Ссылка на док удалена')
             return True
+
+    async def set_prefix(self, peer_id: str | int, prefix: str) -> bool:
+        chat_data = self.cur_chats.get(peer_id)
+        if not chat_data:
+            await self.message_func(peer_id, 'Чат не авторизован')
+            return False
+        chat_data['prefix'] = prefix
+        await self.message_func(peer_id, f'Префикс установлен: {prefix}')
+        return True
+
+    async def get_prefix(self, peer_id: str | int):
+        chat_data = self.cur_chats.get(peer_id)
+        if not chat_data:
+            prefix = '/'
+        else:
+            prefix = chat_data['prefix']
+        return prefix
 
     async def get_game_info(self, peer_id: str | int) -> str | None:
         chat_data = self.cur_chats.get(peer_id)
@@ -833,8 +872,10 @@ class EncounterBot:
                     await self.message_func(peer_id, curlevel_info[0])
                     await self.message_func(peer_id, curlevel_info[1])
 
-                    if len(game_json['Level']['Tasks']) > 0:
-                        await self.send_kml_info(peer_id, game_json['Level']['Tasks'][0]['TaskText'], game_json['Level']['Number'])
+                    hint_str = await self.get_hints(peer_id)
+                    await self.message_func(peer_id, hint_str[0]+'\n'+hint_str[1])
+
+                    await self.get_kml(peer_id)
 
                     # Сохраняем информацию о пройденном уровне
                     chat_data['old_levels'][str(old_json['Level']['Number'])] = {}
@@ -886,7 +927,18 @@ class EncounterBot:
                     for i, elem in enumerate(chat_data["cur_json"]['Level']['Helps']):
                         if elem['HelpText'] != old_json['Level']['Helps'][i]['HelpText']:
                             await self.message_func(peer_id, f'Подсказка {i + 1}: {parse_html(elem["HelpText"], chat_data.get('parser', False))}')
-                            await self.send_kml_info(peer_id, elem["HelpText"], game_json['Level']['Number'])
+                            if elem["HelpText"]:
+                                await self.send_kml_info(peer_id, elem["HelpText"], game_json['Level']['Number'])
+
+                # Проверка, что пришла штрафная подсказка
+                if len(chat_data["cur_json"]['Level']['PenaltyHelps']) != len(old_json['Level']['PenaltyHelps']):
+                    await self.message_func(peer_id, 'Была добавлена штрафная подсказка')
+                else:
+                    for i, elem in enumerate(chat_data["cur_json"]['Level']['PenaltyHelps']):
+                        if (elem['HelpText'] != old_json['Level']['PenaltyHelps'][i]['HelpText']) or (elem['RemainSeconds'] == 0 and elem['RemainSeconds'] != old_json['Level']['PenaltyHelps'][i]['RemainSeconds']):
+                            await self.message_func(peer_id, f'Штрафная подсказка {elem["Number"]} id {elem["HelpId"]}: {'не ' if elem["PenaltyHelpState"] == 0 else ''} открыта: Штраф {elem["Penalty"]} секунд\n{parse_html(elem["HelpText"], chat_data.get('parser', False)) if elem["HelpText"] else ''}')
+                            if elem["HelpText"]:
+                                await self.send_kml_info(peer_id, elem["HelpText"], game_json['Level']['Number'])
 
                 # мониторинг закрытия секторов
                 if chat_data['sector_monitor']:
@@ -965,7 +1017,7 @@ class EncounterBot:
             await self.message_func(peer_id, f'Установлен уровень №{level_num} в штурме')
             return True
 
-    async def get_level_list(self, peer_id: str|int):
+    async def get_level_list(self, peer_id: str | int):
         chat_data = self.cur_chats.get(peer_id)
         if not chat_data:
             await self.message_func(peer_id, 'Чат не авторизован')
@@ -975,3 +1027,11 @@ class EncounterBot:
             result_str += f'{'✅' if elem.get('IsPassed') else ''}{elem.get('LevelNumber')} {elem.get('LevelName')}\n'
         await self.message_func(peer_id, result_str)
 
+    async def get_kml(self, peer_id: str | int):
+        chat_data = self.cur_chats.get(peer_id)
+        if not chat_data:
+            await self.message_func(peer_id, 'Чат не авторизован')
+            return False
+        game_json = chat_data['cur_json']
+        if len(game_json['Level']['Tasks']) > 0:
+            await self.send_kml_info(peer_id, game_json['Level']['Tasks'][0]['TaskText'], game_json['Level']['Number'])

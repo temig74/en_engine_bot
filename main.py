@@ -85,16 +85,16 @@ https://github.com/temig74
 /help, /start - этот help
 /auth домен id_игры логин пароль [id_чата] - авторизовать бота на игру в игровом чате (или в личке, добавив id_чата)
 /stop_auth - отключить чат
-/get_id - получить id чата и пользователя
+/get_id - получить id чата
 /game_monitor [0] - включить/[отключить] слежение за игрой
 /s, /sectors [level№] - показать сектора [прошедшего_уровня]
-/sectors_left - оставшиеся сектора на уровне
+/sl - оставшиеся сектора на уровне
 /b, /bonuses [level№] - показать бонусы [прошедшего_уровня]
-/bonuses_left - оставшиеся бонусы на уровне
+/bl - оставшиеся бонусы на уровне
 /h, /hints - показать подсказки
 /t, /task - показать текущее задание
-/screen, /скрин - скриншот текущего уровня
-/fscreen, /фскрин - полный скриншот текущего уровня
+/scr, /скр - скриншот текущего уровня
+/fs, /фс - полный скриншот текущего уровня
 /любой_код123 - вбитие в движок любой_код123
 /!любой_код123 - вбитие в сектор любой_код123 (актуально при блокировке)
 /accept_codes [0] - включить/[выключить] прием кодов из чата
@@ -118,6 +118,8 @@ https://github.com/temig74
 /leave_chat id_чата - покинуть чат с указанным id
 /set_level номер_уровня - установить текущий номер уровня (актуально для штурма)
 /levels - список уровней
+/set_prefix prefix - установить префикс для вбития кодов (если отличен от / то нужен будет доступ бота к сообщениям чата)
+/penalty id_штрафной_подсказки - взять штрафную подсказку
     ''')
 
 
@@ -142,9 +144,9 @@ async def cmd_auth(message: Message, args: list[str], peer_id: int, from_):
     await EN_BOT.auth(cur_chat_id, my_domain, my_game_id, my_login, my_password)
 
 
-@dp.message(CmdFilter(['screen', 'скрин', 'fscreen', 'фскрин'], [0]))
+@dp.message(CmdFilter(['scr', 'скр', 'screen', 'скрин', 'fs', 'фс'], [0]))
 async def cmd_screen(message: Message, command: str, peer_id: int):
-    full = command in ['fscreen', 'фскрин']
+    full = command in ['fs', 'фс']
     screen_bytes = await EN_BOT.get_screen_as_bytes_async(peer_id, full)
     await sender_function(peer_id, screen_bytes)
 
@@ -174,15 +176,18 @@ async def cmd_get_id(message: Message, peer_id: int, from_: str):
 @dp.message(CmdFilter(['h', 'hints'], [0]))
 async def cmd_hint(message: Message, peer_id: int):
     hint_str = await EN_BOT.get_hints(peer_id)
-    await sender_function(peer_id, hint_str)
+    await sender_function(peer_id, hint_str[0]+'\n'+hint_str[1])
 
 
 @dp.message(CmdFilter(['t', 'task'], [0]))
 async def cmd_task(message: Message, peer_id: int):
+    time_str = await EN_BOT.get_time(peer_id)
+    await sender_function(peer_id, time_str)
     task_str = await EN_BOT.get_task(peer_id)
-    await sender_function(peer_id, task_str)
+    await sender_function(peer_id, task_str[1])
     hint_str = await EN_BOT.get_hints(peer_id)
-    await sender_function(peer_id, hint_str)
+    await sender_function(peer_id, hint_str[0]+'\n'+hint_str[1])
+    await EN_BOT.get_kml(peer_id)
 
 
 @dp.message(CmdFilter(['open_browser'], [0]))
@@ -197,13 +202,15 @@ async def cmd_open_browser(message: Message, peer_id: int, from_: str):
 async def cmd_time(message: Message, peer_id: int):
     time_str = await EN_BOT.get_time(peer_id)
     await sender_function(peer_id, time_str)
+    hint_str = await EN_BOT.get_hints(peer_id)
+    await sender_function(peer_id, hint_str[1])
 
 
-@dp.message(CmdFilter(['s', 'sectors', 'sectors_left', 'b', 'bonuses', 'bonuses_left'], [0, 1]))
+@dp.message(CmdFilter(['s', 'sectors', 'sl', 'b', 'bonuses', 'bl'], [0, 1]))
 async def cmd_sectors(message: Message, command: str, args: list[str], peer_id: int):
-    sector = True if command in ['s', 'sectors', 'sectors_left'] else False
+    sector = True if command in ['s', 'sectors', 'sl'] else False
     levelnum = args[0] if args else '0'
-    result_str = await EN_BOT.get_sectors_and_bonuses(peer_id, sector, levelnum, True if command in ('sectors_left', 'bonuses_left') else False)
+    result_str = await EN_BOT.get_sectors_and_bonuses(peer_id, sector, levelnum, True if command in ('sl', 'bl') else False)
     await sender_function(peer_id, result_str)
 
 
@@ -232,6 +239,15 @@ async def cmd_set_doc(message: Message, args: list[str], peer_id: int):
 async def cmd_set_coords(message: Message, peer_id: int):
     coords = message.text.replace(',', ' ').split()[1:3]
     await EN_BOT.set_coords(peer_id, coords)
+
+
+@dp.message(CmdFilter(['set_prefix'], [0, 1]))
+async def cmd_set_prefix(message: Message, args: list[str], peer_id: int):
+    if args:
+        prefix = args[0]
+    else:
+        prefix = ''
+    await EN_BOT.set_prefix(peer_id, prefix)
 
 
 @dp.message(CmdFilter(['game_info'], [0]))
@@ -284,12 +300,19 @@ async def cmd_levels(message: Message, args: list[str], peer_id: int):
     await EN_BOT.get_level_list(peer_id)
 
 
+@dp.message(CmdFilter(['penalty'], [0, 1]))
+async def cmd_penalty(message: Message, args: list[str], peer_id: int):
+    if not args:
+        await message.answer('Не указан id штрафной подсказки')
+    await EN_BOT.take_penalty_hint(peer_id, args[0])
+
 
 @dp.message(F.content_type == ContentType.TEXT)
 async def send_answer(message: Message):
-    if message.text[0] != '/':
+    prefix = await EN_BOT.get_prefix(message.chat.id)
+    if not message.text.startswith(prefix):
         return
-    answer = message.text[1:]
+    answer = message.text[len(prefix):]
     if answer[0] == '!':
         answer = answer[1:]
         send_to_sector = True
