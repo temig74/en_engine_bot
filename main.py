@@ -12,6 +12,7 @@ import re
 
 from encounter_bot import EncounterBot
 import logging
+
 logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler(sys.stdout)])
 
 try:
@@ -48,7 +49,7 @@ class CmdFilter(BaseFilter):
         if command not in self.commands:
             return False
         # Проверка, что количество аргументов соответствует
-        if self.args_count and len(input_split)-1 not in self.args_count:
+        if self.args_count and len(input_split) - 1 not in self.args_count:
             await message.answer('Количество аргументов не соответствует команде')
             return False
 
@@ -171,6 +172,7 @@ async def cmd_game_monitor(message: Message, args: list[str], peer_id: int):
     except Exception as e:
         await message.answer(f'Ошибка {e}')
 
+
 @dp.message(CmdFilter(['stop_auth'], None))
 async def cmd_stop_auth(message: Message, peer_id: int, from_: str):
     try:
@@ -181,6 +183,7 @@ async def cmd_stop_auth(message: Message, peer_id: int, from_: str):
     except Exception as e:
         await message.answer(f'Ошибка {e}')
 
+
 @dp.message(CmdFilter(['get_id'], None))
 async def cmd_get_id(message: Message, peer_id: int, from_: str):
     await message.answer(f'id чата: <code>{peer_id}</code>\nпользователь: {from_}', parse_mode='HTML')
@@ -190,9 +193,10 @@ async def cmd_get_id(message: Message, peer_id: int, from_: str):
 async def cmd_hint(message: Message, peer_id: int):
     try:
         hint_str = await EN_BOT.get_hints(peer_id)
-        await sender_function(peer_id, hint_str[0]+'\n'+hint_str[1])
+        await sender_function(peer_id, hint_str[0] + '\n' + hint_str[1])
     except Exception as e:
         await message.answer(f'Ошибка {e}')
+
 
 @dp.message(CmdFilter(['t', 'task'], None))
 async def cmd_task(message: Message, peer_id: int):
@@ -202,10 +206,11 @@ async def cmd_task(message: Message, peer_id: int):
         task_str = await EN_BOT.get_task(peer_id)
         await sender_function(peer_id, task_str[1])
         hint_str = await EN_BOT.get_hints(peer_id)
-        await sender_function(peer_id, hint_str[0]+'\n'+hint_str[1])
+        await sender_function(peer_id, hint_str[0] + '\n' + hint_str[1])
         await EN_BOT.get_kml(peer_id)
     except Exception as e:
         await message.answer(f'Ошибка {e}')
+
 
 @dp.message(CmdFilter(['open_browser'], None))
 async def cmd_open_browser(message: Message, peer_id: int, from_: str):
@@ -255,6 +260,7 @@ async def switch_flag(message: Message, command: str, args: list[str], peer_id: 
         await EN_BOT.switch_flag(peer_id, command, switch)
     except Exception as e:
         await message.answer(f'Ошибка {e}')
+
 
 @dp.message(CmdFilter(['set_players'], None))
 async def cmd_set_players(message: Message, args: list[str], peer_id: int):
@@ -306,7 +312,7 @@ async def cmd_game_info(message: Message, peer_id: int):
 async def cmd_geo(message: Message, args: list[str], peer_id: int):
     try:
         if args:
-            await sender_function(peer_id, [args])
+            await sender_function(peer_id, args)
         else:
             await message.answer('Введите широту и долготу после команды через пробел')
     except Exception as e:
@@ -373,50 +379,50 @@ async def send_answer(message: Message):
             return
 
         if message.text.lower().split()[0] in ['/auth',
-                                         '/stop_auth',
-                                         '/get_id',
-                                         '/game_monitor',
-                                         '/s',
-                                         '/sectors',
-                                         '/sl',
-                                         '/bl',
-                                         '/b',
-                                         '/bonuses',
-                                         '/h',
-                                         '/hints',
-                                         '/t',
-                                         '/task',
-                                         '/scr',
-                                         '/скр',
-                                         '/скрин',
-                                         '/screen',
-                                         '/fs',
-                                         '/фс',
-                                         '/accept_codes',
-                                         '/sector_monitor',
-                                         '/bonus_monitor',
-                                         '/parser',
-                                         '/send_screen',
-                                         '/send_code_in_block',
-                                         '/route_builder',
-                                         '/up_full_screen',
-                                         '/set_coords',
-                                         '/time',
-                                         '/load_old_json',
-                                         '/geo',
-                                         '/*',
-                                         '/set_players',
-                                         '/open_browser',
-                                         '/game_info',
-                                         '/set_doc',
-                                         '/buttons',
-                                         '/w',
-                                         '/wf',
-                                         '/set_level',
-                                         '/levels',
-                                         '/set_prefix',
-                                         '/penalty'
-                                         ]:
+                                               '/stop_auth',
+                                               '/get_id',
+                                               '/game_monitor',
+                                               '/s',
+                                               '/sectors',
+                                               '/sl',
+                                               '/bl',
+                                               '/b',
+                                               '/bonuses',
+                                               '/h',
+                                               '/hints',
+                                               '/t',
+                                               '/task',
+                                               '/scr',
+                                               '/скр',
+                                               '/скрин',
+                                               '/screen',
+                                               '/fs',
+                                               '/фс',
+                                               '/accept_codes',
+                                               '/sector_monitor',
+                                               '/bonus_monitor',
+                                               '/parser',
+                                               '/send_screen',
+                                               '/send_code_in_block',
+                                               '/route_builder',
+                                               '/up_full_screen',
+                                               '/set_coords',
+                                               '/time',
+                                               '/load_old_json',
+                                               '/geo',
+                                               '/*',
+                                               '/set_players',
+                                               '/open_browser',
+                                               '/game_info',
+                                               '/set_doc',
+                                               '/buttons',
+                                               '/w',
+                                               '/wf',
+                                               '/set_level',
+                                               '/levels',
+                                               '/set_prefix',
+                                               '/penalty'
+                                               ]:
             return
 
         answer = message.text[len(prefix):]
@@ -436,6 +442,7 @@ async def main():
     EN_BOT = await EncounterBot.create(sender_function)
     await TG_BOT.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(TG_BOT)
+
 
 if __name__ == '__main__':
     asyncio.run(main())
