@@ -22,6 +22,7 @@ try:
     TASK_MAX_LEN = int(config['Settings']['Task_max_len'])  # Максимальное кол-во символов в одном сообщении, если превышает, то разбивается на несколько
     MAX_SCREEN_HEIGHT = int(config['Settings']['Max_screen_height'])
     TG_TOKEN = config['Settings']['Token']
+    print(ADMIN_USERNAMES)
 except Exception as se:
     logging.error(f"Error reading settings.ini config: {se}")
     exit(1)
@@ -55,7 +56,7 @@ class CmdFilter(BaseFilter):
 
         args = input_split[1:] if len(input_split) > 1 else None
         peer_id = message.chat.id
-        return {'command': command, 'args': args, 'peer_id': peer_id, 'from_': message.from_user.username}
+        return {'command': command, 'args': args, 'peer_id': peer_id, 'from_': message.from_user.username.lower()}
 
 
 def add_coords_copy(text):
@@ -130,6 +131,7 @@ https://github.com/temig74
 async def cmd_auth(message: Message, args: list[str], peer_id: int, from_):
     try:
         if from_ not in ADMIN_USERNAMES:
+            print(f'from={from_}')
             await message.answer('Недостаточно прав для авторизации бота')
             return
         if not args:
